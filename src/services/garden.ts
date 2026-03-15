@@ -14,7 +14,17 @@ function resolveSpaceId(db: Database, seasonId: string, spaceName?: string): str
 
 export function addSpace(input: repo.CreateSpaceInput) {
   const db = getDb();
+  const existing = repo.getSpaceByName(db, input.seasonId, input.name);
+  if (existing) throw new TendError("CONFLICT", `Space '${input.name}' already exists`);
   return repo.createSpace(db, input);
+}
+
+export function removeSpace(seasonId: string, name: string) {
+  const db = getDb();
+  const space = repo.getSpaceByName(db, seasonId, name);
+  if (!space) throw new TendError("NOT_FOUND", `Space '${name}' not found`);
+  repo.deleteSpace(db, space.id);
+  return space;
 }
 
 export function listSpaces(seasonId: string) {
@@ -44,10 +54,12 @@ export function listPlantings(seasonId: string, filters?: { spaceId?: string; st
   return repo.listPlantings(db, seasonId, filters);
 }
 
-export function updatePlantingStage(plantingId: string, stage: string, date?: string) {
+export function updatePlantingStage(plantingIdOrCrop: string, stage: string, date?: string) {
   const db = getDb();
-  const existing = repo.getPlanting(db, plantingId);
-  if (!existing) throw new TendError("NOT_FOUND", `Planting '${plantingId}' not found`);
+  const config = readConfig();
+  const existing = repo.findPlanting(db, config.defaultSeasonId, plantingIdOrCrop);
+  if (!existing) throw new TendError("NOT_FOUND", `Planting '${plantingIdOrCrop}' not found`);
+  const plantingId = existing.id;
   const planting = repo.updatePlantingStage(db, plantingId, stage, date);
   repo.createEvent(db, {
     seasonId: existing.season_id,
@@ -72,10 +84,12 @@ export function listTasks(seasonId: string, filters?: { status?: string; spaceId
   return repo.listTasks(db, seasonId, filters);
 }
 
-export function completeTask(taskId: string) {
+export function completeTask(taskIdOrTitle: string) {
   const db = getDb();
-  const existing = repo.getTask(db, taskId);
-  if (!existing) throw new TendError("NOT_FOUND", `Task '${taskId}' not found`);
+  const config = readConfig();
+  const existing = repo.findTask(db, config.defaultSeasonId, taskIdOrTitle);
+  if (!existing) throw new TendError("NOT_FOUND", `Task '${taskIdOrTitle}' not found`);
+  const taskId = existing.id;
   const task = repo.completeTask(db, taskId);
   repo.createEvent(db, {
     seasonId: existing.season_id,
@@ -109,7 +123,8 @@ export function getSummary(seasonId: string) {
   const spaces = repo.listSpaces(db, seasonId);
   const plantings = repo.listPlantings(db, seasonId);
   const openTasks = repo.listTasks(db, seasonId, { status: "open" });
-  return { garden, season, spaces, plantings, openTasks };
+  const seedPlans = repo.listSeedPlans(db, seasonId);
+  return { garden, season, spaces, plantings, openTasks, seedPlans };
 }
 
 // --- Week ---
@@ -180,10 +195,12 @@ export function listSeedPlans(seasonId: string, filters?: { status?: string; sta
   return repo.listSeedPlans(db, seasonId, filters);
 }
 
-export function updateSeedPlanStatus(planId: string, status: string, date?: string) {
+export function updateSeedPlanStatus(planIdOrCrop: string, status: string, date?: string) {
   const db = getDb();
-  const existing = repo.getSeedPlan(db, planId);
-  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planId}' not found`);
+  const config = readConfig();
+  const existing = repo.findSeedPlan(db, config.defaultSeasonId, planIdOrCrop);
+  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planIdOrCrop}' not found`);
+  const planId = existing.id;
 
   const dateFieldMap: Record<string, string> = {
     started: "started_at",
@@ -247,6 +264,9 @@ export function getSeedSchedule(seasonId: string) {
       upcoming.push({ ...p, next_action: "No target date set", next_date: "" });
     }
   }
+
+  overdue.sort((a, b) => a.next_date.localeCompare(b.next_date));
+  upcoming.sort((a, b) => (a.next_date || "9999").localeCompare(b.next_date || "9999"));
 
   return { overdue, upcoming, done };
 }

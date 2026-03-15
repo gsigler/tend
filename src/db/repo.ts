@@ -197,6 +197,14 @@ export function getPlanting(db: Database, id: string): Planting | null {
   return db.query("SELECT * FROM plantings WHERE id = ?").get(id) as Planting | null;
 }
 
+export function findPlanting(db: Database, seasonId: string, idOrCrop: string): Planting | null {
+  // Try by ID first
+  const byId = getPlanting(db, idOrCrop);
+  if (byId) return byId;
+  // Then by crop name (returns first match)
+  return db.query("SELECT * FROM plantings WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as Planting | null;
+}
+
 export function updatePlantingStage(db: Database, id: string, stage: string, date?: string): Planting | null {
   const now = new Date().toISOString();
   const updates: string[] = ["stage = ?", "updated_at = ?"];
@@ -321,6 +329,13 @@ export function getTask(db: Database, id: string): Task | null {
   return db.query("SELECT * FROM tasks WHERE id = ?").get(id) as Task | null;
 }
 
+export function findTask(db: Database, seasonId: string, idOrTitle: string): Task | null {
+  const byId = getTask(db, idOrTitle);
+  if (byId) return byId;
+  // Partial title match
+  return db.query("SELECT * FROM tasks WHERE season_id = ? AND title LIKE ? AND status = 'open' ORDER BY created_at DESC LIMIT 1").get(seasonId, `%${idOrTitle}%`) as Task | null;
+}
+
 export function completeTask(db: Database, id: string): Task | null {
   const now = new Date().toISOString();
   db.run("UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?", [now, now, id]);
@@ -394,6 +409,16 @@ export function createSeedPlan(db: Database, input: CreateSeedPlanInput): SeedPl
 
 export function getSeedPlan(db: Database, id: string): SeedPlan | null {
   return db.query("SELECT * FROM seed_plans WHERE id = ?").get(id) as SeedPlan | null;
+}
+
+export function findSeedPlan(db: Database, seasonId: string, idOrCrop: string): SeedPlan | null {
+  const byId = getSeedPlan(db, idOrCrop);
+  if (byId) return byId;
+  return db.query("SELECT * FROM seed_plans WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as SeedPlan | null;
+}
+
+export function deleteSpace(db: Database, id: string): void {
+  db.run("DELETE FROM spaces WHERE id = ?", [id]);
 }
 
 export function listSeedPlans(db: Database, seasonId: string, filters?: { status?: string; startType?: string }): SeedPlan[] {

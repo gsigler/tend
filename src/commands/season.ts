@@ -37,8 +37,8 @@ export function seasonList(json: boolean): void {
       return;
     }
     for (const s of seasons) {
-      const active = s.id === config.defaultSeasonId ? " (active)" : "";
-      console.log(`  ${s.name} [${s.status}] ${s.id}${active}`);
+      const current = s.id === config.defaultSeasonId ? " ← current" : "";
+      console.log(`  ${s.name} [${s.status}] ${s.id}${current}`);
     }
   }
 }

@@ -7,6 +7,10 @@ import * as garden from "./services/garden";
 import * as repo from "./db/repo";
 import { handleError, output } from "./commands/output";
 import { TendError } from "./services/errors";
+import {
+  validateSpaceType, validateLayoutMode, validateSourceType, validateStage,
+  validateTaskType, validatePriority, validateEventType, validateStartType, validatePlanStatus,
+} from "./commands/validate";
 
 const program = new Command();
 
@@ -14,6 +18,23 @@ program
   .name("tend")
   .description("Local-first CLI for tracking and managing a personal garden")
   .version("0.1.0");
+
+// Helper to resolve space name → ID
+function resolveSpaceId(spaceName?: string): string | undefined {
+  if (!spaceName) return undefined;
+  const config = readConfig();
+  const db = getDb();
+  const space = repo.getSpaceByName(db, config.defaultSeasonId, spaceName);
+  if (!space) throw new TendError("NOT_FOUND", `Space '${spaceName}' not found`);
+  return space.id;
+}
+
+// Helper to build space ID→name map
+function buildSpaceMap(): Map<string, string> {
+  const config = readConfig();
+  const spaces = garden.listSpaces(config.defaultSeasonId);
+  return new Map(spaces.map(s => [s.id, s.name]));
+}
 
 // --- init ---
 program
@@ -23,9 +44,10 @@ program
   .option("--year <year>", "Starting year", String(new Date().getFullYear()))
   .option("--last-frost <date>", "Last frost date (YYYY-MM-DD)")
   .option("--first-frost <date>", "First frost date (YYYY-MM-DD)")
+  .option("--force", "Reinitialize even if already set up", false)
   .action((opts) => {
     try {
-      initCommand({ name: opts.name, year: parseInt(opts.year), lastFrost: opts.lastFrost, firstFrost: opts.firstFrost });
+      initCommand({ name: opts.name, year: parseInt(opts.year), lastFrost: opts.lastFrost, firstFrost: opts.firstFrost, force: opts.force });
     } catch (e) { handleError(e, false); }
   });
 
@@ -41,15 +63,27 @@ program
       if (opts.json) {
         output(data, true);
       } else {
+        const spaceMap = new Map(data.spaces.map(s => [s.id, s.name]));
         console.log(`\nGarden: ${data.garden?.name ?? "Unknown"}`);
         console.log(`Season: ${data.season?.name ?? "Unknown"} [${data.season?.status}]`);
+        if (data.season?.last_frost_date) console.log(`Last frost: ${data.season.last_frost_date}`);
+        if (data.season?.first_frost_date) console.log(`First frost: ${data.season.first_frost_date}`);
         console.log(`\nSpaces (${data.spaces.length}):`);
-        for (const s of data.spaces) console.log(`  ${s.name} (${s.type})`);
-        const spaceMap = new Map(data.spaces.map(s => [s.id, s.name]));
+        for (const s of data.spaces) {
+          const dims = s.width && s.length ? ` ${s.width}x${s.length}${s.unit ?? ""}` : "";
+          console.log(`  ${s.name} (${s.type})${dims}`);
+        }
         console.log(`\nPlantings (${data.plantings.length}):`);
         for (const p of data.plantings) {
           const spaceName = p.space_id ? spaceMap.get(p.space_id) ?? p.space_id : "";
           console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.stage}]${spaceName ? ` in ${spaceName}` : ""}`);
+        }
+        if (data.seedPlans.length > 0) {
+          const activePlans = data.seedPlans.filter(p => !["done", "skipped", "transplanted", "direct_sown"].includes(p.status));
+          console.log(`\nSeed Plans (${activePlans.length} active, ${data.seedPlans.length} total):`);
+          for (const p of activePlans) {
+            console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.status}]${p.target_start_date ? ` start ${p.target_start_date}` : ""}`);
+          }
         }
         console.log(`\nOpen Tasks (${data.openTasks.length}):`);
         for (const t of data.openTasks) console.log(`  [${t.priority}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`);
@@ -86,13 +120,19 @@ program
           console.log("\nSuggested Checks:");
           for (const s of plan.suggestions) console.log(`  → ${s}`);
         }
-        if (plan.planActions.length > 0) {
+        // Only show plan actions that don't already have generated tasks
+        const taskTitles = new Set([...plan.overdue, ...plan.thisWeek].map(t => t.title));
+        const uniquePlanActions = plan.planActions.filter(a => {
+          const expectedTitle = `${a.action.replace("OVERDUE: ", "").replace("Start seeds", a.plan.start_type === "indoor" ? "Start indoors" : "Direct sow")}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}`;
+          return !taskTitles.has(expectedTitle);
+        });
+        if (uniquePlanActions.length > 0) {
           console.log("\nSeed Plan Actions:");
-          for (const a of plan.planActions) {
+          for (const a of uniquePlanActions) {
             console.log(`  ${a.targetDate} | ${a.action}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}${a.plan.qty_to_start ? ` x${a.plan.qty_to_start}` : ""}`);
           }
         }
-        if (plan.overdue.length === 0 && plan.thisWeek.length === 0 && plan.noDue.length === 0 && plan.suggestions.length === 0 && plan.planActions.length === 0) {
+        if (plan.overdue.length === 0 && plan.thisWeek.length === 0 && plan.noDue.length === 0 && plan.suggestions.length === 0 && uniquePlanActions.length === 0) {
           console.log("  Nothing to do this week!");
         }
       }
@@ -144,6 +184,8 @@ spacesCmd
   .option("--notes <text>", "Notes")
   .action((name, opts) => {
     try {
+      validateSpaceType(opts.type);
+      validateLayoutMode(opts.layout);
       const config = readConfig();
       const space = garden.addSpace({
         seasonId: config.defaultSeasonId,
@@ -156,6 +198,17 @@ spacesCmd
         notes: opts.notes,
       });
       console.log(`Added space: ${space.name} (${space.id})`);
+    } catch (e) { handleError(e, false); }
+  });
+
+spacesCmd
+  .command("remove <name>")
+  .description("Remove a growing space")
+  .action((name) => {
+    try {
+      const config = readConfig();
+      const space = garden.removeSpace(config.defaultSeasonId, name);
+      console.log(`Removed space: ${space.name}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -195,14 +248,10 @@ plantingsCmd
   .option("--notes <text>", "Notes")
   .action((crop, opts) => {
     try {
+      validateSourceType(opts.source);
+      validateStage(opts.stage);
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const planting = garden.addPlanting({
         seasonId: config.defaultSeasonId,
         spaceId,
@@ -229,32 +278,29 @@ plantingsCmd
   .action((opts) => {
     try {
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const plantings = garden.listPlantings(config.defaultSeasonId, { spaceId, stage: opts.stage, crop: opts.crop });
       if (opts.json) {
         output(plantings, true);
       } else {
         if (plantings.length === 0) { console.log("No plantings found."); return; }
+        const spaceMap = buildSpaceMap();
         for (const p of plantings) {
-          console.log(`  ${p.id} | ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.stage}] [${p.health}]${p.space_id ? ` in ${p.space_id}` : ""}`);
+          const spaceName = p.space_id ? spaceMap.get(p.space_id) ?? p.space_id : "";
+          console.log(`  ${p.id} | ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.stage}] [${p.health}]${spaceName ? ` in ${spaceName}` : ""}`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
   });
 
 plantingsCmd
-  .command("update-stage <plantingId> <stage>")
-  .description("Update a planting's stage")
+  .command("update-stage <plantingIdOrCrop> <stage>")
+  .description("Update a planting's stage (by ID or crop name)")
   .option("--date <date>", "Date of stage change")
-  .action((plantingId, stage, opts) => {
+  .action((plantingIdOrCrop, stage, opts) => {
     try {
-      const planting = garden.updatePlantingStage(plantingId, stage, opts.date);
+      validateStage(stage);
+      const planting = garden.updatePlantingStage(plantingIdOrCrop, stage, opts.date);
       console.log(`Updated ${planting!.crop} to stage: ${stage}`);
     } catch (e) { handleError(e, false); }
   });
@@ -272,14 +318,10 @@ tasksCmd
   .option("--notes <text>", "Notes")
   .action((title, opts) => {
     try {
+      validateTaskType(opts.type);
+      validatePriority(opts.priority);
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const task = garden.addTask({
         seasonId: config.defaultSeasonId,
         spaceId,
@@ -295,40 +337,36 @@ tasksCmd
 
 tasksCmd
   .command("list")
-  .description("List tasks")
-  .option("--status <status>", "Filter by status")
+  .description("List tasks (defaults to open only)")
+  .option("--status <status>", "Filter by status (open, done, skipped)")
+  .option("--all", "Show all tasks including done", false)
   .option("--space <name>", "Filter by space name")
   .option("--due-before <date>", "Filter by due date")
   .option("--json", "Output as JSON", false)
   .action((opts) => {
     try {
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
-      const tasks = garden.listTasks(config.defaultSeasonId, { status: opts.status, spaceId, dueBefore: opts.dueBefore });
+      const spaceId = resolveSpaceId(opts.space);
+      const status = opts.all ? undefined : (opts.status ?? "open");
+      const tasks = garden.listTasks(config.defaultSeasonId, { status, spaceId, dueBefore: opts.dueBefore });
       if (opts.json) {
         output(tasks, true);
       } else {
         if (tasks.length === 0) { console.log("No tasks found."); return; }
         for (const t of tasks) {
-          const status = t.status === "done" ? "✓" : "○";
-          console.log(`  ${status} ${t.id} | [${t.priority}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""} [${t.status}]`);
+          const icon = t.status === "done" ? "✓" : t.status === "skipped" ? "–" : "○";
+          console.log(`  ${icon} ${t.id} | [${t.priority}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""} [${t.status}]`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
   });
 
 tasksCmd
-  .command("done <taskId>")
-  .description("Mark a task as done")
-  .action((taskId) => {
+  .command("done <taskIdOrTitle>")
+  .description("Mark a task as done (by ID or title search)")
+  .action((taskIdOrTitle) => {
     try {
-      const task = garden.completeTask(taskId);
+      const task = garden.completeTask(taskIdOrTitle);
       console.log(`Completed: ${task!.title}`);
     } catch (e) { handleError(e, false); }
   });
@@ -346,13 +384,7 @@ eventsCmd
   .action((opts) => {
     try {
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const events = garden.listEvents(config.defaultSeasonId, {
         plantingId: opts.planting,
         spaceId,
@@ -376,26 +408,21 @@ program
   .option("--space <name>", "Space name")
   .option("--planting <id>", "Planting ID")
   .option("--type <type>", "Event type (observed, harvested, note, etc.)", "note")
-  .option("--note <text>", "Note / summary")
+  .requiredOption("--note <text>", "Note / summary (required)")
   .option("--data <json>", "Additional JSON data")
   .option("--date <date>", "Date (YYYY-MM-DD)")
   .action((opts) => {
     try {
+      validateEventType(opts.type);
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const event = garden.logEvent({
         seasonId: config.defaultSeasonId,
         spaceId,
         plantingId: opts.planting,
         type: opts.type,
         happenedAt: opts.date,
-        summary: opts.note ?? "",
+        summary: opts.note,
         dataJson: opts.data,
       });
       console.log(`Logged: [${event.type}] ${event.summary} (${event.id})`);
@@ -420,14 +447,9 @@ planCmd
   .option("--notes <text>", "Notes")
   .action((crop, opts) => {
     try {
+      validateStartType(opts.startType);
       const config = readConfig();
-      let spaceId: string | undefined;
-      if (opts.space) {
-        const db = getDb();
-        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
-        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
-        spaceId = space.id;
-      }
+      const spaceId = resolveSpaceId(opts.space);
       const plan = garden.addSeedPlan({
         seasonId: config.defaultSeasonId,
         crop,
@@ -522,12 +544,13 @@ planCmd
   });
 
 planCmd
-  .command("update <planId> <status>")
-  .description("Update a seed plan status (started, hardening, transplanted, direct_sown, done, skipped)")
+  .command("update <planIdOrCrop> <status>")
+  .description("Update a seed plan status (by ID or crop name)")
   .option("--date <date>", "Date of status change (YYYY-MM-DD)")
-  .action((planId, status, opts) => {
+  .action((planIdOrCrop, status, opts) => {
     try {
-      const plan = garden.updateSeedPlanStatus(planId, status, opts.date);
+      validatePlanStatus(status);
+      const plan = garden.updateSeedPlanStatus(planIdOrCrop, status, opts.date);
       console.log(`Updated: ${plan!.crop}${plan!.variety ? ` (${plan!.variety})` : ""} → ${status}`);
     } catch (e) { handleError(e, false); }
   });
