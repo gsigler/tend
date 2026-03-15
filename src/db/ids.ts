@@ -1,6 +1,5 @@
-import { randomUUIDv7 } from "bun";
-
 export function genId(prefix: string): string {
-  const uuid = randomUUIDv7().replace(/-/g, "").slice(0, 12);
-  return `${prefix}_${uuid}`;
+  const ts = Date.now().toString(36);
+  const rand = Math.random().toString(36).slice(2, 10);
+  return `${prefix}_${ts}${rand}`;
 }
