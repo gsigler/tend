@@ -72,6 +72,15 @@ export function updatePlantingStage(plantingIdOrCrop: string, stage: string, dat
   return planting;
 }
 
+export function removePlanting(idOrCrop: string) {
+  const db = getDb();
+  const config = readConfig();
+  const existing = repo.findPlanting(db, config.defaultSeasonId, idOrCrop);
+  if (!existing) throw new TendError("NOT_FOUND", `Planting '${idOrCrop}' not found`);
+  repo.deletePlanting(db, existing.id);
+  return existing;
+}
+
 // --- Tasks ---
 
 export function addTask(input: repo.CreateTaskInput) {
@@ -99,6 +108,15 @@ export function completeTask(taskIdOrTitle: string) {
     summary: `Completed: ${existing.title}`,
   });
   return task;
+}
+
+export function removeTask(taskIdOrTitle: string) {
+  const db = getDb();
+  const config = readConfig();
+  const existing = repo.findTask(db, config.defaultSeasonId, taskIdOrTitle);
+  if (!existing) throw new TendError("NOT_FOUND", `Task '${taskIdOrTitle}' not found`);
+  repo.deleteTask(db, existing.id);
+  return existing;
 }
 
 // --- Events ---
@@ -148,15 +166,16 @@ export function getWeekPlan(seasonId: string) {
   const suggestions: string[] = [];
 
   for (const p of plantings) {
+    const name = p.variety ? `${p.crop} (${p.variety})` : p.crop;
     const recentEvents = events.filter(e => e.planting_id === p.id && e.happened_at >= sevenDaysAgo);
     if (p.stage === "seedling" && recentEvents.length === 0) {
-      suggestions.push(`Seedling "${p.crop}" has not been checked in 7+ days`);
+      suggestions.push(`Check seedling: ${name} — not checked in 7+ days`);
     }
     if (p.stage === "hardening_off" && recentEvents.length === 0) {
-      suggestions.push(`Hardening plant "${p.crop}" has no recent activity`);
+      suggestions.push(`Check hardening: ${name} — no recent activity`);
     }
     if (p.stage === "producing" && recentEvents.length === 0) {
-      suggestions.push(`Producing plant "${p.crop}" has no recent harvest or observation`);
+      suggestions.push(`Check producing: ${name} — no recent harvest or observation`);
     }
   }
 
@@ -214,14 +233,25 @@ export function updateSeedPlanStatus(planIdOrCrop: string, status: string, date?
     dateField ? { field: dateField, value: date ?? new Date().toISOString().split("T")[0] } : undefined
   );
 
+  const eventDate = date ?? new Date().toISOString().split("T")[0];
   repo.createEvent(db, {
     seasonId: existing.season_id,
     spaceId: existing.space_id ?? undefined,
     type: "stage_changed",
+    happenedAt: eventDate,
     summary: `Seed plan: ${existing.crop}${existing.variety ? ` (${existing.variety})` : ""} → ${status}`,
   });
 
   return plan;
+}
+
+export function removeSeedPlan(planIdOrCrop: string) {
+  const db = getDb();
+  const config = readConfig();
+  const existing = repo.findSeedPlan(db, config.defaultSeasonId, planIdOrCrop);
+  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planIdOrCrop}' not found`);
+  repo.deleteSeedPlan(db, existing.id);
+  return existing;
 }
 
 export function getSeedSchedule(seasonId: string) {

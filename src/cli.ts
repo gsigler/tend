@@ -11,6 +11,7 @@ import {
   validateSpaceType, validateLayoutMode, validateSourceType, validateStage,
   validateTaskType, validatePriority, validateEventType, validateStartType, validatePlanStatus,
 } from "./commands/validate";
+import { humanize, relativeDate, shortDate, pad, cropName, header, priorityIcon } from "./commands/format";
 
 const program = new Command();
 
@@ -64,29 +65,50 @@ program
         output(data, true);
       } else {
         const spaceMap = new Map(data.spaces.map(s => [s.id, s.name]));
-        console.log(`\nGarden: ${data.garden?.name ?? "Unknown"}`);
-        console.log(`Season: ${data.season?.name ?? "Unknown"} [${data.season?.status}]`);
-        if (data.season?.last_frost_date) console.log(`Last frost: ${data.season.last_frost_date}`);
-        if (data.season?.first_frost_date) console.log(`First frost: ${data.season.first_frost_date}`);
-        console.log(`\nSpaces (${data.spaces.length}):`);
-        for (const s of data.spaces) {
-          const dims = s.width && s.length ? ` ${s.width}x${s.length}${s.unit ?? ""}` : "";
-          console.log(`  ${s.name} (${s.type})${dims}`);
-        }
-        console.log(`\nPlantings (${data.plantings.length}):`);
-        for (const p of data.plantings) {
-          const spaceName = p.space_id ? spaceMap.get(p.space_id) ?? p.space_id : "";
-          console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.stage}]${spaceName ? ` in ${spaceName}` : ""}`);
-        }
-        if (data.seedPlans.length > 0) {
-          const activePlans = data.seedPlans.filter(p => !["done", "skipped", "transplanted", "direct_sown"].includes(p.status));
-          console.log(`\nSeed Plans (${activePlans.length} active, ${data.seedPlans.length} total):`);
-          for (const p of activePlans) {
-            console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.status}]${p.target_start_date ? ` start ${p.target_start_date}` : ""}`);
+        console.log(header(`${data.garden?.name ?? "Garden"} — ${data.season?.name ?? "Season"}`));
+        const frost = [
+          data.season?.last_frost_date ? `Last frost: ${shortDate(data.season.last_frost_date)}` : null,
+          data.season?.first_frost_date ? `First frost: ${shortDate(data.season.first_frost_date)}` : null,
+        ].filter(Boolean).join("  •  ");
+        if (frost) console.log(frost);
+
+        if (data.spaces.length > 0) {
+          console.log(header("Spaces"));
+          for (const s of data.spaces) {
+            const dims = s.width && s.length ? ` ${s.width}×${s.length}${s.unit ?? ""}` : "";
+            const layout = s.layout_mode !== "none" ? ` (${humanize(s.layout_mode)})` : "";
+            console.log(`  ${pad(s.name, 20)} ${humanize(s.type)}${dims}${layout}`);
           }
         }
-        console.log(`\nOpen Tasks (${data.openTasks.length}):`);
-        for (const t of data.openTasks) console.log(`  [${t.priority}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""}`);
+
+        if (data.plantings.length > 0) {
+          console.log(header("Plantings"));
+          for (const p of data.plantings) {
+            const spaceName = p.space_id ? spaceMap.get(p.space_id) : null;
+            const where = spaceName ? `  → ${spaceName}` : "";
+            console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.stage), 16)} ${humanize(p.health)}${where}`);
+          }
+        }
+
+        if (data.seedPlans.length > 0) {
+          const active = data.seedPlans.filter(p => !["done", "skipped", "transplanted", "direct_sown"].includes(p.status));
+          console.log(header(`Seed Plans (${active.length} active)`));
+          for (const p of active) {
+            const date = p.target_start_date ? `  start ${relativeDate(p.target_start_date)}` : "";
+            console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.status), 12)}${date}`);
+          }
+        }
+
+        console.log(header(`Open Tasks (${data.openTasks.length})`));
+        if (data.openTasks.length === 0) {
+          console.log("  All clear!");
+        } else {
+          for (const t of data.openTasks) {
+            const due = t.due_at ? relativeDate(t.due_at) : "";
+            console.log(`  ${priorityIcon(t.priority)} ${pad(t.title, 40)} ${due}`);
+          }
+        }
+        console.log("");
       }
     } catch (e) { handleError(e, opts.json); }
   });
@@ -103,38 +125,55 @@ program
       if (opts.json) {
         output(plan, true);
       } else {
-        console.log("\n--- Weekly Plan ---\n");
+        console.log(header("Weekly Plan"));
+        let empty = true;
+
         if (plan.overdue.length > 0) {
-          console.log("OVERDUE:");
-          for (const t of plan.overdue) console.log(`  [${t.priority}] ${t.title} (due ${t.due_at})`);
+          empty = false;
+          console.log("\n  OVERDUE");
+          for (const t of plan.overdue) {
+            console.log(`  ${priorityIcon(t.priority)} ${pad(t.title, 40)} ${relativeDate(t.due_at!)}`);
+          }
         }
         if (plan.thisWeek.length > 0) {
-          console.log("\nThis Week:");
-          for (const t of plan.thisWeek) console.log(`  [${t.priority}] ${t.title} (due ${t.due_at})`);
+          empty = false;
+          console.log("\n  THIS WEEK");
+          for (const t of plan.thisWeek) {
+            console.log(`  ${priorityIcon(t.priority)} ${pad(t.title, 40)} ${relativeDate(t.due_at!)}`);
+          }
         }
         if (plan.noDue.length > 0) {
-          console.log("\nNo Due Date:");
-          for (const t of plan.noDue) console.log(`  [${t.priority}] ${t.title}`);
+          empty = false;
+          console.log("\n  NO DUE DATE");
+          for (const t of plan.noDue) {
+            console.log(`  ${priorityIcon(t.priority)} ${t.title}`);
+          }
         }
         if (plan.suggestions.length > 0) {
-          console.log("\nSuggested Checks:");
-          for (const s of plan.suggestions) console.log(`  → ${s}`);
+          empty = false;
+          console.log("\n  SUGGESTED CHECKS");
+          for (const s of plan.suggestions) console.log(`   →  ${s}`);
         }
-        // Only show plan actions that don't already have generated tasks
+        // Deduplicate plan actions that already have tasks
         const taskTitles = new Set([...plan.overdue, ...plan.thisWeek].map(t => t.title));
         const uniquePlanActions = plan.planActions.filter(a => {
-          const expectedTitle = `${a.action.replace("OVERDUE: ", "").replace("Start seeds", a.plan.start_type === "indoor" ? "Start indoors" : "Direct sow")}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}`;
+          const verb = a.action.replace("OVERDUE: ", "").replace("Start seeds", a.plan.start_type === "indoor" ? "Start indoors" : "Direct sow");
+          const expectedTitle = `${verb}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}`;
           return !taskTitles.has(expectedTitle);
         });
         if (uniquePlanActions.length > 0) {
-          console.log("\nSeed Plan Actions:");
+          empty = false;
+          console.log("\n  SEED PLAN ACTIONS");
           for (const a of uniquePlanActions) {
-            console.log(`  ${a.targetDate} | ${a.action}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}${a.plan.qty_to_start ? ` x${a.plan.qty_to_start}` : ""}`);
+            const name = cropName(a.plan.crop, a.plan.variety);
+            const qty = a.plan.qty_to_start ? ` ×${a.plan.qty_to_start}` : "";
+            console.log(`   →  ${a.action}: ${name}${qty}  ${relativeDate(a.targetDate)}`);
           }
         }
-        if (plan.overdue.length === 0 && plan.thisWeek.length === 0 && plan.noDue.length === 0 && plan.suggestions.length === 0 && uniquePlanActions.length === 0) {
-          console.log("  Nothing to do this week!");
+        if (empty) {
+          console.log("\n  Nothing to do this week!");
         }
+        console.log("");
       }
     } catch (e) { handleError(e, opts.json); }
   });
@@ -197,7 +236,7 @@ spacesCmd
         unit: opts.unit,
         notes: opts.notes,
       });
-      console.log(`Added space: ${space.name} (${space.id})`);
+      console.log(`Added space: ${space.name} (${humanize(space.type)})`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -225,8 +264,10 @@ spacesCmd
       } else {
         if (spaces.length === 0) { console.log("No spaces defined."); return; }
         for (const s of spaces) {
-          const dims = s.width && s.length ? ` ${s.width}x${s.length}${s.unit ? s.unit : ""}` : "";
-          console.log(`  ${s.name} (${s.type})${dims} [${s.layout_mode}]`);
+          const dims = s.width && s.length ? `  ${s.width}×${s.length}${s.unit ?? ""}` : "";
+          const layout = s.layout_mode !== "none" ? `  (${humanize(s.layout_mode)})` : "";
+          const notes = s.notes ? `  — ${s.notes}` : "";
+          console.log(`  ${pad(s.name, 20)} ${humanize(s.type)}${dims}${layout}${notes}`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
@@ -264,7 +305,7 @@ plantingsCmd
         startedAt: opts.date,
         notes: opts.notes,
       });
-      console.log(`Added planting: ${planting.crop}${planting.variety ? ` (${planting.variety})` : ""} [${planting.stage}] (${planting.id})`);
+      console.log(`Added: ${cropName(planting.crop, planting.variety)} [${humanize(planting.stage)}]`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -285,9 +326,12 @@ plantingsCmd
       } else {
         if (plantings.length === 0) { console.log("No plantings found."); return; }
         const spaceMap = buildSpaceMap();
-        for (const p of plantings) {
-          const spaceName = p.space_id ? spaceMap.get(p.space_id) ?? p.space_id : "";
-          console.log(`  ${p.id} | ${p.crop}${p.variety ? ` - ${p.variety}` : ""} [${p.stage}] [${p.health}]${spaceName ? ` in ${spaceName}` : ""}`);
+        for (let i = 0; i < plantings.length; i++) {
+          const p = plantings[i];
+          const spaceName = p.space_id ? spaceMap.get(p.space_id) : null;
+          const where = spaceName ? `  → ${spaceName}` : "";
+          const date = p.started_at ? `  (${shortDate(p.started_at)})` : "";
+          console.log(`  ${pad(`#${i + 1}`, 4)} ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.stage), 16)} ${humanize(p.health)}${where}${date}`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
@@ -301,7 +345,17 @@ plantingsCmd
     try {
       validateStage(stage);
       const planting = garden.updatePlantingStage(plantingIdOrCrop, stage, opts.date);
-      console.log(`Updated ${planting!.crop} to stage: ${stage}`);
+      console.log(`Updated: ${cropName(planting!.crop, planting!.variety)} → ${humanize(stage)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+plantingsCmd
+  .command("remove <plantingIdOrCrop>")
+  .description("Remove a planting (by ID or crop name)")
+  .action((plantingIdOrCrop) => {
+    try {
+      const planting = garden.removePlanting(plantingIdOrCrop);
+      console.log(`Removed: ${cropName(planting.crop, planting.variety)}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -331,7 +385,7 @@ tasksCmd
         dueAt: opts.due,
         notes: opts.notes,
       });
-      console.log(`Added task: ${task.title} (${task.id})`);
+      console.log(`Added: ${task.title}${task.due_at ? ` (due ${relativeDate(task.due_at)})` : ""}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -353,9 +407,14 @@ tasksCmd
         output(tasks, true);
       } else {
         if (tasks.length === 0) { console.log("No tasks found."); return; }
-        for (const t of tasks) {
+        const spaceMap = buildSpaceMap();
+        for (let i = 0; i < tasks.length; i++) {
+          const t = tasks[i];
           const icon = t.status === "done" ? "✓" : t.status === "skipped" ? "–" : "○";
-          console.log(`  ${icon} ${t.id} | [${t.priority}] ${t.title}${t.due_at ? ` (due ${t.due_at})` : ""} [${t.status}]`);
+          const spaceName = t.space_id ? spaceMap.get(t.space_id) : null;
+          const where = spaceName ? `  [${spaceName}]` : "";
+          const due = t.due_at ? `  ${relativeDate(t.due_at)}` : "";
+          console.log(`  ${icon} ${pad(`#${i + 1}`, 4)} ${priorityIcon(t.priority)} ${pad(t.title, 40)}${due}${where}`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
@@ -367,7 +426,17 @@ tasksCmd
   .action((taskIdOrTitle) => {
     try {
       const task = garden.completeTask(taskIdOrTitle);
-      console.log(`Completed: ${task!.title}`);
+      console.log(`✓ ${task!.title}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+tasksCmd
+  .command("remove <taskIdOrTitle>")
+  .description("Remove a task (by ID or title search)")
+  .action((taskIdOrTitle) => {
+    try {
+      const task = garden.removeTask(taskIdOrTitle);
+      console.log(`Removed: ${task.title}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -377,7 +446,7 @@ const eventsCmd = program.command("events").description("View garden timeline");
 eventsCmd
   .command("list")
   .description("List events")
-  .option("--planting <id>", "Filter by planting ID")
+  .option("--planting <id>", "Filter by planting ID or crop name")
   .option("--space <name>", "Filter by space name")
   .option("--limit <n>", "Limit results", "50")
   .option("--json", "Output as JSON", false)
@@ -385,8 +454,17 @@ eventsCmd
     try {
       const config = readConfig();
       const spaceId = resolveSpaceId(opts.space);
+
+      // Support planting lookup by crop name
+      let plantingId = opts.planting;
+      if (plantingId && !plantingId.startsWith("planting_")) {
+        const db = getDb();
+        const found = repo.findPlanting(db, config.defaultSeasonId, plantingId);
+        if (found) plantingId = found.id;
+      }
+
       const events = garden.listEvents(config.defaultSeasonId, {
-        plantingId: opts.planting,
+        plantingId,
         spaceId,
         limit: parseInt(opts.limit),
       });
@@ -395,7 +473,8 @@ eventsCmd
       } else {
         if (events.length === 0) { console.log("No events found."); return; }
         for (const e of events) {
-          console.log(`  ${e.happened_at.split("T")[0]} [${e.type}] ${e.summary}`);
+          const date = shortDate(e.happened_at.split("T")[0]);
+          console.log(`  ${pad(date, 8)} ${pad(humanize(e.type), 18)} ${e.summary}`);
         }
       }
     } catch (e) { handleError(e, opts.json); }
@@ -406,7 +485,7 @@ program
   .command("log")
   .description("Add a journal entry / event")
   .option("--space <name>", "Space name")
-  .option("--planting <id>", "Planting ID")
+  .option("--planting <id>", "Planting ID or crop name")
   .option("--type <type>", "Event type (observed, harvested, note, etc.)", "note")
   .requiredOption("--note <text>", "Note / summary (required)")
   .option("--data <json>", "Additional JSON data")
@@ -416,16 +495,25 @@ program
       validateEventType(opts.type);
       const config = readConfig();
       const spaceId = resolveSpaceId(opts.space);
+
+      // Support planting lookup by crop name
+      let plantingId = opts.planting;
+      if (plantingId && !plantingId.startsWith("planting_")) {
+        const db = getDb();
+        const found = repo.findPlanting(db, config.defaultSeasonId, plantingId);
+        if (found) plantingId = found.id;
+      }
+
       const event = garden.logEvent({
         seasonId: config.defaultSeasonId,
         spaceId,
-        plantingId: opts.planting,
+        plantingId,
         type: opts.type,
         happenedAt: opts.date,
         summary: opts.note,
         dataJson: opts.data,
       });
-      console.log(`Logged: [${event.type}] ${event.summary} (${event.id})`);
+      console.log(`Logged: [${humanize(event.type)}] ${event.summary}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -464,11 +552,10 @@ planCmd
         targetTransplantDate: opts.transplantDate,
         notes: opts.notes,
       });
-      console.log(`Added to plan: ${plan.crop}${plan.variety ? ` (${plan.variety})` : ""} [${plan.start_type}]`);
-      if (plan.target_start_date) console.log(`  Start: ${plan.target_start_date}`);
-      if (plan.target_harden_date) console.log(`  Harden: ${plan.target_harden_date}`);
-      if (plan.target_transplant_date) console.log(`  Transplant: ${plan.target_transplant_date}`);
-      console.log(`  ID: ${plan.id}`);
+      console.log(`Added to plan: ${cropName(plan.crop, plan.variety)} [${humanize(plan.start_type)}]`);
+      if (plan.target_start_date) console.log(`  Start:      ${relativeDate(plan.target_start_date)}`);
+      if (plan.target_harden_date) console.log(`  Harden:     ${relativeDate(plan.target_harden_date)}`);
+      if (plan.target_transplant_date) console.log(`  Transplant: ${relativeDate(plan.target_transplant_date)}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -486,18 +573,30 @@ planCmd
         output(plans, true);
       } else {
         if (plans.length === 0) { console.log("No seed plans found."); return; }
+        const spaceMap = buildSpaceMap();
         console.log("");
-        for (const p of plans) {
-          const src = p.source ? ` (${p.source})` : "";
-          const qty = p.qty_to_start ? ` x${p.qty_to_start}` : "";
-          const grid = p.grid_squares ? ` [${p.grid_squares} sq]` : "";
-          console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""}${src}${qty}${grid}`);
-          console.log(`    Type: ${p.start_type} | Status: ${p.status}`);
-          if (p.target_start_date) console.log(`    Start: ${p.target_start_date}${p.started_at ? ` (done ${p.started_at})` : ""}`);
-          if (p.target_harden_date) console.log(`    Harden: ${p.target_harden_date}${p.hardened_at ? ` (done ${p.hardened_at})` : ""}`);
-          if (p.target_transplant_date) console.log(`    Transplant: ${p.target_transplant_date}${p.transplanted_at ? ` (done ${p.transplanted_at})` : ""}`);
-          if (p.notes) console.log(`    Notes: ${p.notes}`);
-          console.log(`    ID: ${p.id}`);
+        for (let i = 0; i < plans.length; i++) {
+          const p = plans[i];
+          const src = p.source ? `  from ${p.source}` : "";
+          const qty = p.qty_to_start ? `  ×${p.qty_to_start}` : "";
+          const grid = p.grid_squares ? `  [${p.grid_squares} sq]` : "";
+          const spaceName = p.space_id ? spaceMap.get(p.space_id) : null;
+          const where = spaceName ? `  → ${spaceName}` : "";
+          console.log(`  #${i + 1}  ${cropName(p.crop, p.variety)}${src}${qty}${grid}${where}`);
+          console.log(`      ${humanize(p.start_type)} • ${humanize(p.status)}`);
+          if (p.target_start_date) {
+            const done = p.started_at ? ` ✓ ${shortDate(p.started_at)}` : "";
+            console.log(`      Start:      ${relativeDate(p.target_start_date)}${done}`);
+          }
+          if (p.target_harden_date) {
+            const done = p.hardened_at ? ` ✓ ${shortDate(p.hardened_at)}` : "";
+            console.log(`      Harden:     ${relativeDate(p.target_harden_date)}${done}`);
+          }
+          if (p.target_transplant_date) {
+            const done = p.transplanted_at ? ` ✓ ${shortDate(p.transplanted_at)}` : "";
+            console.log(`      Transplant: ${relativeDate(p.target_transplant_date)}${done}`);
+          }
+          if (p.notes) console.log(`      Note: ${p.notes}`);
           console.log("");
         }
       }
@@ -515,30 +614,32 @@ planCmd
       if (opts.json) {
         output(schedule, true);
       } else {
-        console.log("\n--- Seed Starting Schedule ---\n");
+        console.log(header("Seed Starting Schedule"));
         if (schedule.overdue.length > 0) {
-          console.log("OVERDUE:");
+          console.log("\n  OVERDUE");
           for (const p of schedule.overdue) {
-            console.log(`  ${p.next_date} | ${p.next_action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}${p.qty_to_start ? ` x${p.qty_to_start}` : ""}`);
+            const qty = p.qty_to_start ? ` ×${p.qty_to_start}` : "";
+            console.log(`  !!  ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${relativeDate(p.next_date)}`);
           }
-          console.log("");
         }
         if (schedule.upcoming.length > 0) {
-          console.log("Upcoming:");
+          console.log("\n  UPCOMING");
           for (const p of schedule.upcoming) {
-            console.log(`  ${p.next_date || "no date"} | ${p.next_action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}${p.qty_to_start ? ` x${p.qty_to_start}` : ""}`);
+            const qty = p.qty_to_start ? ` ×${p.qty_to_start}` : "";
+            const date = p.next_date ? relativeDate(p.next_date) : "no date set";
+            console.log(`      ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${date}`);
           }
-          console.log("");
         }
         if (schedule.done.length > 0) {
-          console.log(`Done (${schedule.done.length}):`);
+          console.log(`\n  DONE (${schedule.done.length})`);
           for (const p of schedule.done) {
-            console.log(`  ${p.crop}${p.variety ? ` (${p.variety})` : ""} [${p.status}]`);
+            console.log(`   ✓  ${cropName(p.crop, p.variety)} [${humanize(p.status)}]`);
           }
         }
         if (schedule.overdue.length === 0 && schedule.upcoming.length === 0 && schedule.done.length === 0) {
-          console.log("  No seed plans yet. Add one with: tend plan add <crop>");
+          console.log("\n  No seed plans yet. Add one with: tend plan add <crop>");
         }
+        console.log("");
       }
     } catch (e) { handleError(e, opts.json); }
   });
@@ -551,7 +652,17 @@ planCmd
     try {
       validatePlanStatus(status);
       const plan = garden.updateSeedPlanStatus(planIdOrCrop, status, opts.date);
-      console.log(`Updated: ${plan!.crop}${plan!.variety ? ` (${plan!.variety})` : ""} → ${status}`);
+      console.log(`Updated: ${cropName(plan!.crop, plan!.variety)} → ${humanize(status)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+planCmd
+  .command("remove <planIdOrCrop>")
+  .description("Remove a seed plan (by ID or crop name)")
+  .action((planIdOrCrop) => {
+    try {
+      const plan = garden.removeSeedPlan(planIdOrCrop);
+      console.log(`Removed: ${cropName(plan.crop, plan.variety)}`);
     } catch (e) { handleError(e, false); }
   });
 
@@ -563,11 +674,11 @@ planCmd
       const config = readConfig();
       const created = garden.generateTasksFromPlans(config.defaultSeasonId);
       if (created.length === 0) {
-        console.log("No new tasks to generate. Plans are either complete or tasks already exist.");
+        console.log("No new tasks to generate.");
       } else {
         console.log(`Generated ${created.length} task(s):`);
         for (const t of created) {
-          console.log(`  [${t.priority}] ${t.title} (due ${t.due_at})`);
+          console.log(`  ${priorityIcon(t.priority)} ${t.title}  ${t.due_at ? relativeDate(t.due_at) : ""}`);
         }
       }
     } catch (e) { handleError(e, false); }

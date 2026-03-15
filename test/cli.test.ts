@@ -37,7 +37,6 @@ describe("CLI integration", () => {
     expect(out).toContain("Initialized tend");
     expect(out).toContain("TestGarden");
 
-    // Verify config exists
     const configPath = join(tendDir, ".tend", "config.json");
     const config = JSON.parse(readFileSync(configPath, "utf-8"));
     expect(config.defaultGardenId).toStartWith("garden_");
@@ -49,7 +48,8 @@ describe("CLI integration", () => {
     cli("init --name G --year 2026");
 
     const addOut = cli("spaces add bed-1 --type raised_bed --width 12 --length 2 --unit ft");
-    expect(addOut).toContain("Added space: bed-1");
+    expect(addOut).toContain("bed-1");
+    expect(addOut).toContain("Raised Bed");
 
     cli("spaces add tray-a --type tray");
 
@@ -65,14 +65,14 @@ describe("CLI integration", () => {
     cli("spaces add bed-1 --type raised_bed");
 
     const addOut = cli("plantings add peas --space bed-1 --source seed --stage direct_sown --date 2026-03-15");
-    expect(addOut).toContain("Added planting: peas");
+    expect(addOut).toContain("peas");
+    expect(addOut).toContain("Direct Sown");
 
     cli("plantings add lettuce --space bed-1 --variety buttercrunch --source start --stage transplanted");
 
     const plantings = cliJson("plantings list --json");
     expect(plantings).toHaveLength(2);
 
-    // Filter by crop
     const peasOnly = cliJson("plantings list --crop peas --json");
     expect(peasOnly).toHaveLength(1);
     expect(peasOnly[0].crop).toBe("peas");
@@ -87,10 +87,32 @@ describe("CLI integration", () => {
     const plantingId = plantings[0].id;
 
     const out = cli(`plantings update-stage ${plantingId} seedling --date 2026-04-01`);
-    expect(out).toContain("Updated peas to stage: seedling");
+    expect(out).toContain("peas");
+    expect(out).toContain("Seedling");
 
     const updated = cliJson("plantings list --json");
     expect(updated[0].stage).toBe("seedling");
+  });
+
+  test("plantings update-stage by crop name", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add tomato --stage seeded_indoors");
+
+    const out = cli("plantings update-stage tomato seedling");
+    expect(out).toContain("tomato");
+    expect(out).toContain("Seedling");
+  });
+
+  test("plantings remove", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add tomato --stage planned");
+
+    const out = cli("plantings remove tomato");
+    expect(out).toContain("Removed");
+    expect(out).toContain("tomato");
+
+    const plantings = cliJson("plantings list --json");
+    expect(plantings).toHaveLength(0);
   });
 
   test("tasks add, list, done", () => {
@@ -98,7 +120,7 @@ describe("CLI integration", () => {
     cli("spaces add bed-1 --type raised_bed");
 
     const addOut = cli("tasks add Check-peas --space bed-1 --type check --priority high --due 2026-03-20");
-    expect(addOut).toContain("Added task: Check-peas");
+    expect(addOut).toContain("Check-peas");
 
     const tasks = cliJson("tasks list --json");
     expect(tasks).toHaveLength(1);
@@ -106,11 +128,30 @@ describe("CLI integration", () => {
     expect(tasks[0].status).toBe("open");
 
     const doneOut = cli(`tasks done ${tasks[0].id}`);
-    expect(doneOut).toContain("Completed: Check-peas");
+    expect(doneOut).toContain("Check-peas");
 
     const doneTasks = cliJson("tasks list --status done --json");
     expect(doneTasks).toHaveLength(1);
     expect(doneTasks[0].completed_at).not.toBeNull();
+  });
+
+  test("tasks done by title search", () => {
+    cli("init --name G --year 2026");
+    cli("tasks add Water-the-beds --type maintenance");
+
+    const out = cli("tasks done Water");
+    expect(out).toContain("Water-the-beds");
+  });
+
+  test("tasks remove", () => {
+    cli("init --name G --year 2026");
+    cli("tasks add Weed --type maintenance");
+
+    const out = cli("tasks remove Weed");
+    expect(out).toContain("Removed");
+
+    const tasks = cliJson("tasks list --json");
+    expect(tasks).toHaveLength(0);
   });
 
   test("log and events list", () => {
@@ -118,7 +159,8 @@ describe("CLI integration", () => {
     cli("spaces add bed-1 --type raised_bed");
 
     const logOut = cli("log --space bed-1 --type observed --note soil-looks-dry --date 2026-03-16");
-    expect(logOut).toContain("Logged: [observed]");
+    expect(logOut).toContain("Logged");
+    expect(logOut).toContain("Observed");
 
     cli("log --type note --note started-composting --date 2026-03-17");
 
@@ -150,6 +192,7 @@ describe("CLI integration", () => {
     expect(data.spaces).toBeArray();
     expect(data.plantings).toBeArray();
     expect(data.openTasks).toBeArray();
+    expect(data.seedPlans).toBeArray();
   });
 
   test("week --json returns structured data", () => {
@@ -160,6 +203,7 @@ describe("CLI integration", () => {
     expect(data.thisWeek).toBeArray();
     expect(data.noDue).toBeArray();
     expect(data.suggestions).toBeArray();
+    expect(data.planActions).toBeArray();
   });
 
   test("season create and list", () => {
@@ -192,7 +236,7 @@ describe("CLI integration", () => {
 
     const out = cli("plan add snapdragon --variety Madame-Butterfly --source Burpee --qty 15 --grid 12 --space bed-1 --start-date 2026-03-15 --harden-date 2026-04-20 --transplant-date 2026-05-01 --notes flower-boxes");
     expect(out).toContain("Added to plan: snapdragon");
-    expect(out).toContain("indoor");
+    expect(out).toContain("Indoor");
 
     const plans = cliJson("plan list --json");
     expect(plans).toHaveLength(1);
@@ -233,11 +277,32 @@ describe("CLI integration", () => {
     const planId = plans[0].id;
 
     const out = cli(`plan update ${planId} started --date 2026-03-01`);
-    expect(out).toContain("started");
+    expect(out).toContain("Started");
 
     const updated = cliJson("plan list --json");
     expect(updated[0].status).toBe("started");
     expect(updated[0].started_at).toBe("2026-03-01");
+  });
+
+  test("plan update by crop name", () => {
+    cli("init --name G --year 2026");
+    cli("plan add basil --start-date 2026-03-15");
+
+    const out = cli("plan update basil started --date 2026-03-15");
+    expect(out).toContain("basil");
+    expect(out).toContain("Started");
+  });
+
+  test("plan remove", () => {
+    cli("init --name G --year 2026");
+    cli("plan add tomato --start-date 2026-03-01");
+
+    const out = cli("plan remove tomato");
+    expect(out).toContain("Removed");
+    expect(out).toContain("tomato");
+
+    const plans = cliJson("plan list --json");
+    expect(plans).toHaveLength(0);
   });
 
   test("plan generate-tasks creates tasks from plan dates", () => {
@@ -274,5 +339,33 @@ describe("CLI integration", () => {
     expect(week.planActions).toBeArray();
     expect(week.planActions.length).toBeGreaterThanOrEqual(1);
     expect(week.planActions[0].plan.crop).toBe("pepper");
+  });
+
+  test("spaces remove", () => {
+    cli("init --name G --year 2026");
+    cli("spaces add bed-1 --type raised_bed");
+
+    const out = cli("spaces remove bed-1");
+    expect(out).toContain("Removed");
+
+    const spaces = cliJson("spaces list --json");
+    expect(spaces).toHaveLength(0);
+  });
+
+  test("duplicate space names rejected", () => {
+    cli("init --name G --year 2026");
+    cli("spaces add bed-1 --type raised_bed");
+
+    let threw = false;
+    try { cli("spaces add bed-1 --type tray"); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test("invalid types give friendly errors", () => {
+    cli("init --name G --year 2026");
+
+    let threw = false;
+    try { cli("spaces add bad --type greenhouse"); } catch { threw = true; }
+    expect(threw).toBe(true);
   });
 });

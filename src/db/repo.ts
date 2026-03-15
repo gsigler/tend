@@ -205,6 +205,12 @@ export function findPlanting(db: Database, seasonId: string, idOrCrop: string): 
   return db.query("SELECT * FROM plantings WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as Planting | null;
 }
 
+export function deletePlanting(db: Database, id: string): void {
+  db.run("DELETE FROM events WHERE planting_id = ?", [id]);
+  db.run("DELETE FROM tasks WHERE planting_id = ?", [id]);
+  db.run("DELETE FROM plantings WHERE id = ?", [id]);
+}
+
 export function updatePlantingStage(db: Database, id: string, stage: string, date?: string): Planting | null {
   const now = new Date().toISOString();
   const updates: string[] = ["stage = ?", "updated_at = ?"];
@@ -336,6 +342,10 @@ export function findTask(db: Database, seasonId: string, idOrTitle: string): Tas
   return db.query("SELECT * FROM tasks WHERE season_id = ? AND title LIKE ? AND status = 'open' ORDER BY created_at DESC LIMIT 1").get(seasonId, `%${idOrTitle}%`) as Task | null;
 }
 
+export function deleteTask(db: Database, id: string): void {
+  db.run("DELETE FROM tasks WHERE id = ?", [id]);
+}
+
 export function completeTask(db: Database, id: string): Task | null {
   const now = new Date().toISOString();
   db.run("UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?", [now, now, id]);
@@ -409,6 +419,10 @@ export function createSeedPlan(db: Database, input: CreateSeedPlanInput): SeedPl
 
 export function getSeedPlan(db: Database, id: string): SeedPlan | null {
   return db.query("SELECT * FROM seed_plans WHERE id = ?").get(id) as SeedPlan | null;
+}
+
+export function deleteSeedPlan(db: Database, id: string): void {
+  db.run("DELETE FROM seed_plans WHERE id = ?", [id]);
 }
 
 export function findSeedPlan(db: Database, seasonId: string, idOrCrop: string): SeedPlan | null {
