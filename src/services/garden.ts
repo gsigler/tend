@@ -145,5 +145,163 @@ export function getWeekPlan(seasonId: string) {
     }
   }
 
-  return { overdue, thisWeek, noDue, suggestions };
+  // Seed plan actions due this week
+  const planStartsDue = repo.seedPlansNeedingAction(db, seasonId, nextWeek);
+  const planHardenDue = repo.seedPlansNeedingHarden(db, seasonId, nextWeek);
+  const planTransplantDue = repo.seedPlansNeedingTransplant(db, seasonId, nextWeek);
+
+  const planActions: { action: string; plan: repo.SeedPlan; targetDate: string }[] = [];
+  for (const p of planStartsDue) {
+    const overdue = p.target_start_date! < today;
+    planActions.push({ action: overdue ? "OVERDUE: Start seeds" : "Start seeds", plan: p, targetDate: p.target_start_date! });
+  }
+  for (const p of planHardenDue) {
+    const overdue = p.target_harden_date! < today;
+    planActions.push({ action: overdue ? "OVERDUE: Begin hardening" : "Begin hardening", plan: p, targetDate: p.target_harden_date! });
+  }
+  for (const p of planTransplantDue) {
+    const overdue = p.target_transplant_date! < today;
+    planActions.push({ action: overdue ? "OVERDUE: Transplant" : "Transplant", plan: p, targetDate: p.target_transplant_date! });
+  }
+  planActions.sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+
+  return { overdue, thisWeek, noDue, suggestions, planActions };
+}
+
+// --- Seed Plans ---
+
+export function addSeedPlan(input: repo.CreateSeedPlanInput) {
+  const db = getDb();
+  return repo.createSeedPlan(db, input);
+}
+
+export function listSeedPlans(seasonId: string, filters?: { status?: string; startType?: string }) {
+  const db = getDb();
+  return repo.listSeedPlans(db, seasonId, filters);
+}
+
+export function updateSeedPlanStatus(planId: string, status: string, date?: string) {
+  const db = getDb();
+  const existing = repo.getSeedPlan(db, planId);
+  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planId}' not found`);
+
+  const dateFieldMap: Record<string, string> = {
+    started: "started_at",
+    hardening: "hardened_at",
+    transplanted: "transplanted_at",
+    direct_sown: "started_at",
+  };
+
+  const dateField = dateFieldMap[status];
+  const plan = repo.updateSeedPlanStatus(db, planId, status,
+    dateField ? { field: dateField, value: date ?? new Date().toISOString().split("T")[0] } : undefined
+  );
+
+  repo.createEvent(db, {
+    seasonId: existing.season_id,
+    spaceId: existing.space_id ?? undefined,
+    type: "stage_changed",
+    summary: `Seed plan: ${existing.crop}${existing.variety ? ` (${existing.variety})` : ""} → ${status}`,
+  });
+
+  return plan;
+}
+
+export function getSeedSchedule(seasonId: string) {
+  const db = getDb();
+  const plans = repo.listSeedPlans(db, seasonId);
+  const today = new Date().toISOString().split("T")[0];
+
+  const upcoming: (repo.SeedPlan & { next_action: string; next_date: string })[] = [];
+  const overdue: (repo.SeedPlan & { next_action: string; next_date: string })[] = [];
+  const done: repo.SeedPlan[] = [];
+
+  for (const p of plans) {
+    if (p.status === "done" || p.status === "skipped" || p.status === "transplanted" || p.status === "direct_sown") {
+      done.push(p);
+      continue;
+    }
+
+    let nextAction: string | null = null;
+    let nextDate: string | null = null;
+
+    if (p.status === "planned" && p.target_start_date) {
+      nextAction = p.start_type === "indoor" ? "Start indoors" : "Direct sow";
+      nextDate = p.target_start_date;
+    } else if (p.status === "started" && p.target_harden_date) {
+      nextAction = "Begin hardening off";
+      nextDate = p.target_harden_date;
+    } else if ((p.status === "started" || p.status === "hardening") && p.target_transplant_date) {
+      nextAction = "Transplant";
+      nextDate = p.target_transplant_date;
+    }
+
+    if (nextAction && nextDate) {
+      const entry = { ...p, next_action: nextAction, next_date: nextDate };
+      if (nextDate < today) {
+        overdue.push(entry);
+      } else {
+        upcoming.push(entry);
+      }
+    } else {
+      upcoming.push({ ...p, next_action: "No target date set", next_date: "" });
+    }
+  }
+
+  return { overdue, upcoming, done };
+}
+
+export function generateTasksFromPlans(seasonId: string) {
+  const db = getDb();
+  const plans = repo.listSeedPlans(db, seasonId);
+  const existingTasks = repo.listTasks(db, seasonId);
+  const created: repo.Task[] = [];
+
+  for (const p of plans) {
+    // Check if task already exists for this plan action
+    const hasPlanTask = (keyword: string, dueAt: string | null) =>
+      existingTasks.some(t => t.notes?.includes(p.id) && t.title.includes(keyword) && t.status === "open");
+
+    if (p.status === "planned" && p.target_start_date) {
+      const action = p.start_type === "indoor" ? "Start indoors" : "Direct sow";
+      const title = `${action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
+      if (!hasPlanTask(p.crop, p.target_start_date)) {
+        const task = repo.createTask(db, {
+          seasonId, spaceId: p.space_id ?? undefined,
+          title, type: "seed_start", priority: "high",
+          dueAt: p.target_start_date,
+          notes: `Auto-generated from seed plan ${p.id}. Qty: ${p.qty_to_start ?? "?"}`,
+        });
+        created.push(task);
+      }
+    }
+
+    if (p.status === "started" && p.target_harden_date) {
+      const title = `Begin hardening: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
+      if (!hasPlanTask(p.crop, p.target_harden_date)) {
+        const task = repo.createTask(db, {
+          seasonId, spaceId: p.space_id ?? undefined,
+          title, type: "maintenance", priority: "medium",
+          dueAt: p.target_harden_date,
+          notes: `Auto-generated from seed plan ${p.id}`,
+        });
+        created.push(task);
+      }
+    }
+
+    if ((p.status === "started" || p.status === "hardening") && p.target_transplant_date) {
+      const title = `Transplant: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
+      if (!hasPlanTask(p.crop, p.target_transplant_date)) {
+        const task = repo.createTask(db, {
+          seasonId, spaceId: p.space_id ?? undefined,
+          title, type: "transplant", priority: "high",
+          dueAt: p.target_transplant_date,
+          notes: `Auto-generated from seed plan ${p.id}. Grid squares: ${p.grid_squares ?? "?"}`,
+        });
+        created.push(task);
+      }
+    }
+  }
+
+  return created;
 }

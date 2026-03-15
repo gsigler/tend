@@ -65,6 +65,28 @@ CREATE TABLE IF NOT EXISTS events (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS seed_plans (
+  id TEXT PRIMARY KEY,
+  season_id TEXT NOT NULL REFERENCES seasons(id),
+  crop TEXT NOT NULL,
+  variety TEXT,
+  source TEXT,
+  start_type TEXT NOT NULL DEFAULT 'indoor' CHECK(start_type IN ('indoor','direct_sow')),
+  qty_to_start INTEGER,
+  grid_squares INTEGER,
+  space_id TEXT REFERENCES spaces(id),
+  target_start_date TEXT,
+  target_harden_date TEXT,
+  target_transplant_date TEXT,
+  started_at TEXT,
+  hardened_at TEXT,
+  transplanted_at TEXT,
+  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','started','hardening','transplanted','direct_sown','done','skipped')),
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   season_id TEXT NOT NULL REFERENCES seasons(id),

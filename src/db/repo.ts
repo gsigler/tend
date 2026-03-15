@@ -326,3 +326,116 @@ export function completeTask(db: Database, id: string): Task | null {
   db.run("UPDATE tasks SET status = 'done', completed_at = ?, updated_at = ? WHERE id = ?", [now, now, id]);
   return getTask(db, id);
 }
+
+// --- Seed Plans ---
+
+export interface SeedPlan {
+  id: string;
+  season_id: string;
+  crop: string;
+  variety: string | null;
+  source: string | null;
+  start_type: string;
+  qty_to_start: number | null;
+  grid_squares: number | null;
+  space_id: string | null;
+  target_start_date: string | null;
+  target_harden_date: string | null;
+  target_transplant_date: string | null;
+  started_at: string | null;
+  hardened_at: string | null;
+  transplanted_at: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateSeedPlanInput {
+  seasonId: string;
+  crop: string;
+  variety?: string;
+  source?: string;
+  startType?: string;
+  qtyToStart?: number;
+  gridSquares?: number;
+  spaceId?: string;
+  targetStartDate?: string;
+  targetHardenDate?: string;
+  targetTransplantDate?: string;
+  notes?: string;
+}
+
+export function createSeedPlan(db: Database, input: CreateSeedPlanInput): SeedPlan {
+  const id = genId("plan");
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO seed_plans (id, season_id, crop, variety, source, start_type, qty_to_start, grid_squares, space_id,
+      target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.seasonId, input.crop, input.variety ?? null, input.source ?? null,
+     input.startType ?? "indoor", input.qtyToStart ?? null, input.gridSquares ?? null, input.spaceId ?? null,
+     input.targetStartDate ?? null, input.targetHardenDate ?? null, input.targetTransplantDate ?? null,
+     input.notes ?? null, now, now]
+  );
+  return {
+    id, season_id: input.seasonId, crop: input.crop, variety: input.variety ?? null,
+    source: input.source ?? null, start_type: input.startType ?? "indoor",
+    qty_to_start: input.qtyToStart ?? null, grid_squares: input.gridSquares ?? null,
+    space_id: input.spaceId ?? null,
+    target_start_date: input.targetStartDate ?? null,
+    target_harden_date: input.targetHardenDate ?? null,
+    target_transplant_date: input.targetTransplantDate ?? null,
+    started_at: null, hardened_at: null, transplanted_at: null,
+    status: "planned", notes: input.notes ?? null,
+    created_at: now, updated_at: now,
+  };
+}
+
+export function getSeedPlan(db: Database, id: string): SeedPlan | null {
+  return db.query("SELECT * FROM seed_plans WHERE id = ?").get(id) as SeedPlan | null;
+}
+
+export function listSeedPlans(db: Database, seasonId: string, filters?: { status?: string; startType?: string }): SeedPlan[] {
+  let sql = "SELECT * FROM seed_plans WHERE season_id = ?";
+  const params: any[] = [seasonId];
+  if (filters?.status) { sql += " AND status = ?"; params.push(filters.status); }
+  if (filters?.startType) { sql += " AND start_type = ?"; params.push(filters.startType); }
+  sql += " ORDER BY target_start_date ASC, crop ASC";
+  return db.query(sql).all(...params) as SeedPlan[];
+}
+
+export function updateSeedPlanStatus(db: Database, id: string, status: string, dateField?: { field: string; value: string }): SeedPlan | null {
+  const now = new Date().toISOString();
+  let sql = "UPDATE seed_plans SET status = ?, updated_at = ?";
+  const params: any[] = [status, now];
+  if (dateField) {
+    sql += `, ${dateField.field} = ?`;
+    params.push(dateField.value);
+  }
+  sql += " WHERE id = ?";
+  params.push(id);
+  db.run(sql, params);
+  return getSeedPlan(db, id);
+}
+
+export function seedPlansNeedingAction(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+  return db.query(
+    `SELECT * FROM seed_plans WHERE season_id = ? AND status = 'planned' AND target_start_date IS NOT NULL AND target_start_date <= ?
+     ORDER BY target_start_date ASC`
+  ).all(seasonId, beforeDate) as SeedPlan[];
+}
+
+export function seedPlansNeedingHarden(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+  return db.query(
+    `SELECT * FROM seed_plans WHERE season_id = ? AND status = 'started' AND target_harden_date IS NOT NULL AND target_harden_date <= ?
+     ORDER BY target_harden_date ASC`
+  ).all(seasonId, beforeDate) as SeedPlan[];
+}
+
+export function seedPlansNeedingTransplant(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+  return db.query(
+    `SELECT * FROM seed_plans WHERE season_id = ? AND status IN ('started','hardening') AND target_transplant_date IS NOT NULL AND target_transplant_date <= ?
+     ORDER BY target_transplant_date ASC`
+  ).all(seasonId, beforeDate) as SeedPlan[];
+}

@@ -86,7 +86,13 @@ program
           console.log("\nSuggested Checks:");
           for (const s of plan.suggestions) console.log(`  → ${s}`);
         }
-        if (plan.overdue.length === 0 && plan.thisWeek.length === 0 && plan.noDue.length === 0 && plan.suggestions.length === 0) {
+        if (plan.planActions.length > 0) {
+          console.log("\nSeed Plan Actions:");
+          for (const a of plan.planActions) {
+            console.log(`  ${a.targetDate} | ${a.action}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}${a.plan.qty_to_start ? ` x${a.plan.qty_to_start}` : ""}`);
+          }
+        }
+        if (plan.overdue.length === 0 && plan.thisWeek.length === 0 && plan.noDue.length === 0 && plan.suggestions.length === 0 && plan.planActions.length === 0) {
           console.log("  Nothing to do this week!");
         }
       }
@@ -393,6 +399,154 @@ program
         dataJson: opts.data,
       });
       console.log(`Logged: [${event.type}] ${event.summary} (${event.id})`);
+    } catch (e) { handleError(e, false); }
+  });
+
+// --- plan ---
+const planCmd = program.command("plan").description("Manage seed starting schedule");
+
+planCmd
+  .command("add <crop>")
+  .description("Add a crop to the seed starting plan")
+  .option("--variety <variety>", "Variety name")
+  .option("--source <source>", "Seed source (e.g. Burpee, Johnny's)")
+  .option("--start-type <type>", "Start type (indoor, direct_sow)", "indoor")
+  .option("--qty <n>", "Number of seeds to start")
+  .option("--grid <n>", "Garden grid squares needed")
+  .option("--space <name>", "Target space name")
+  .option("--start-date <date>", "Target start date (YYYY-MM-DD)")
+  .option("--harden-date <date>", "Target hardening date (YYYY-MM-DD)")
+  .option("--transplant-date <date>", "Target transplant date (YYYY-MM-DD)")
+  .option("--notes <text>", "Notes")
+  .action((crop, opts) => {
+    try {
+      const config = readConfig();
+      let spaceId: string | undefined;
+      if (opts.space) {
+        const db = getDb();
+        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
+        if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
+        spaceId = space.id;
+      }
+      const plan = garden.addSeedPlan({
+        seasonId: config.defaultSeasonId,
+        crop,
+        variety: opts.variety,
+        source: opts.source,
+        startType: opts.startType,
+        qtyToStart: opts.qty ? parseInt(opts.qty) : undefined,
+        gridSquares: opts.grid ? parseInt(opts.grid) : undefined,
+        spaceId,
+        targetStartDate: opts.startDate,
+        targetHardenDate: opts.hardenDate,
+        targetTransplantDate: opts.transplantDate,
+        notes: opts.notes,
+      });
+      console.log(`Added to plan: ${plan.crop}${plan.variety ? ` (${plan.variety})` : ""} [${plan.start_type}]`);
+      if (plan.target_start_date) console.log(`  Start: ${plan.target_start_date}`);
+      if (plan.target_harden_date) console.log(`  Harden: ${plan.target_harden_date}`);
+      if (plan.target_transplant_date) console.log(`  Transplant: ${plan.target_transplant_date}`);
+      console.log(`  ID: ${plan.id}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+planCmd
+  .command("list")
+  .description("List all seed plans")
+  .option("--status <status>", "Filter by status")
+  .option("--start-type <type>", "Filter by start type")
+  .option("--json", "Output as JSON", false)
+  .action((opts) => {
+    try {
+      const config = readConfig();
+      const plans = garden.listSeedPlans(config.defaultSeasonId, { status: opts.status, startType: opts.startType });
+      if (opts.json) {
+        output(plans, true);
+      } else {
+        if (plans.length === 0) { console.log("No seed plans found."); return; }
+        console.log("");
+        for (const p of plans) {
+          const src = p.source ? ` (${p.source})` : "";
+          const qty = p.qty_to_start ? ` x${p.qty_to_start}` : "";
+          const grid = p.grid_squares ? ` [${p.grid_squares} sq]` : "";
+          console.log(`  ${p.crop}${p.variety ? ` - ${p.variety}` : ""}${src}${qty}${grid}`);
+          console.log(`    Type: ${p.start_type} | Status: ${p.status}`);
+          if (p.target_start_date) console.log(`    Start: ${p.target_start_date}${p.started_at ? ` (done ${p.started_at})` : ""}`);
+          if (p.target_harden_date) console.log(`    Harden: ${p.target_harden_date}${p.hardened_at ? ` (done ${p.hardened_at})` : ""}`);
+          if (p.target_transplant_date) console.log(`    Transplant: ${p.target_transplant_date}${p.transplanted_at ? ` (done ${p.transplanted_at})` : ""}`);
+          if (p.notes) console.log(`    Notes: ${p.notes}`);
+          console.log(`    ID: ${p.id}`);
+          console.log("");
+        }
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
+planCmd
+  .command("schedule")
+  .description("Show seed starting schedule with next actions")
+  .option("--json", "Output as JSON", false)
+  .action((opts) => {
+    try {
+      const config = readConfig();
+      const schedule = garden.getSeedSchedule(config.defaultSeasonId);
+      if (opts.json) {
+        output(schedule, true);
+      } else {
+        console.log("\n--- Seed Starting Schedule ---\n");
+        if (schedule.overdue.length > 0) {
+          console.log("OVERDUE:");
+          for (const p of schedule.overdue) {
+            console.log(`  ${p.next_date} | ${p.next_action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}${p.qty_to_start ? ` x${p.qty_to_start}` : ""}`);
+          }
+          console.log("");
+        }
+        if (schedule.upcoming.length > 0) {
+          console.log("Upcoming:");
+          for (const p of schedule.upcoming) {
+            console.log(`  ${p.next_date || "no date"} | ${p.next_action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}${p.qty_to_start ? ` x${p.qty_to_start}` : ""}`);
+          }
+          console.log("");
+        }
+        if (schedule.done.length > 0) {
+          console.log(`Done (${schedule.done.length}):`);
+          for (const p of schedule.done) {
+            console.log(`  ${p.crop}${p.variety ? ` (${p.variety})` : ""} [${p.status}]`);
+          }
+        }
+        if (schedule.overdue.length === 0 && schedule.upcoming.length === 0 && schedule.done.length === 0) {
+          console.log("  No seed plans yet. Add one with: tend plan add <crop>");
+        }
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
+planCmd
+  .command("update <planId> <status>")
+  .description("Update a seed plan status (started, hardening, transplanted, direct_sown, done, skipped)")
+  .option("--date <date>", "Date of status change (YYYY-MM-DD)")
+  .action((planId, status, opts) => {
+    try {
+      const plan = garden.updateSeedPlanStatus(planId, status, opts.date);
+      console.log(`Updated: ${plan!.crop}${plan!.variety ? ` (${plan!.variety})` : ""} → ${status}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+planCmd
+  .command("generate-tasks")
+  .description("Auto-generate tasks from seed plan dates")
+  .action(() => {
+    try {
+      const config = readConfig();
+      const created = garden.generateTasksFromPlans(config.defaultSeasonId);
+      if (created.length === 0) {
+        console.log("No new tasks to generate. Plans are either complete or tasks already exist.");
+      } else {
+        console.log(`Generated ${created.length} task(s):`);
+        for (const t of created) {
+          console.log(`  [${t.priority}] ${t.title} (due ${t.due_at})`);
+        }
+      }
     } catch (e) { handleError(e, false); }
   });
 

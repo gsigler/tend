@@ -183,4 +183,96 @@ describe("CLI integration", () => {
     expect(bed1Events).toHaveLength(1);
     expect(bed1Events[0].summary).toContain("bed-1");
   });
+
+  // --- Seed Plan CLI tests ---
+
+  test("plan add and list", () => {
+    cli("init --name G --year 2026");
+    cli("spaces add bed-1 --type raised_bed");
+
+    const out = cli("plan add snapdragon --variety Madame-Butterfly --source Burpee --qty 15 --grid 12 --space bed-1 --start-date 2026-03-15 --harden-date 2026-04-20 --transplant-date 2026-05-01 --notes flower-boxes");
+    expect(out).toContain("Added to plan: snapdragon");
+    expect(out).toContain("indoor");
+
+    const plans = cliJson("plan list --json");
+    expect(plans).toHaveLength(1);
+    expect(plans[0].crop).toBe("snapdragon");
+    expect(plans[0].source).toBe("Burpee");
+    expect(plans[0].qty_to_start).toBe(15);
+    expect(plans[0].grid_squares).toBe(12);
+    expect(plans[0].target_start_date).toBe("2026-03-15");
+  });
+
+  test("plan add direct sow", () => {
+    cli("init --name G --year 2026");
+
+    cli("plan add peas --start-type direct_sow --qty 30 --start-date 2026-03-20");
+
+    const plans = cliJson("plan list --json");
+    expect(plans[0].start_type).toBe("direct_sow");
+  });
+
+  test("plan schedule shows overdue and upcoming", () => {
+    cli("init --name G --year 2026");
+
+    cli("plan add pepper --start-date 2026-01-01");
+    cli("plan add basil --start-date 2099-06-01");
+
+    const schedule = cliJson("plan schedule --json");
+    expect(schedule.overdue.length).toBeGreaterThanOrEqual(1);
+    expect(schedule.overdue[0].crop).toBe("pepper");
+    expect(schedule.upcoming.length).toBeGreaterThanOrEqual(1);
+    expect(schedule.upcoming[0].crop).toBe("basil");
+  });
+
+  test("plan update changes status", () => {
+    cli("init --name G --year 2026");
+    cli("plan add tomato --start-date 2026-03-01");
+
+    const plans = cliJson("plan list --json");
+    const planId = plans[0].id;
+
+    const out = cli(`plan update ${planId} started --date 2026-03-01`);
+    expect(out).toContain("started");
+
+    const updated = cliJson("plan list --json");
+    expect(updated[0].status).toBe("started");
+    expect(updated[0].started_at).toBe("2026-03-01");
+  });
+
+  test("plan generate-tasks creates tasks from plan dates", () => {
+    cli("init --name G --year 2026");
+    cli("plan add tomato --start-date 2026-03-01");
+    cli("plan add peas --start-type direct_sow --start-date 2026-03-20");
+
+    const out = cli("plan generate-tasks");
+    expect(out).toContain("Generated 2 task(s)");
+    expect(out).toContain("Start indoors: tomato");
+    expect(out).toContain("Direct sow: peas");
+
+    const tasks = cliJson("tasks list --json");
+    expect(tasks).toHaveLength(2);
+  });
+
+  test("plan generate-tasks is idempotent", () => {
+    cli("init --name G --year 2026");
+    cli("plan add tomato --start-date 2026-03-01");
+
+    cli("plan generate-tasks");
+    const out = cli("plan generate-tasks");
+    expect(out).toContain("No new tasks to generate");
+
+    const tasks = cliJson("tasks list --json");
+    expect(tasks).toHaveLength(1);
+  });
+
+  test("week shows seed plan actions", () => {
+    cli("init --name G --year 2026");
+    cli("plan add pepper --start-date 2026-01-01");
+
+    const week = cliJson("week --json");
+    expect(week.planActions).toBeArray();
+    expect(week.planActions.length).toBeGreaterThanOrEqual(1);
+    expect(week.planActions[0].plan.crop).toBe("pepper");
+  });
 });
