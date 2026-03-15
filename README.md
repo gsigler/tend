@@ -24,21 +24,17 @@ Open Tasks (1)
   !!! Check peas for germination                    Mar 22 (in 7d)
 ```
 
+## Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/gsigler/tend/main/install.sh | bash
+```
+
+Installs a standalone binary to `~/.local/bin`. No runtime dependencies required.
+
 ## Quick Start
 
 ```bash
-# Install Bun (if needed)
-curl -fsSL https://bun.sh/install | bash
-
-# Clone and install
-git clone <repo-url> && cd tend
-bun install
-
-# Initialize your garden
-bun run src/cli.ts init --name "My Garden" --year 2026
-
-# Or use the alias
-alias tend="bun run $(pwd)/src/cli.ts"
 tend init --name "My Garden" --year 2026
 ```
 

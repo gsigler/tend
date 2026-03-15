@@ -1,0 +1,61 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - os: macos-latest
+            target: darwin-arm64
+          - os: macos-13
+            target: darwin-x64
+          - os: ubuntu-latest
+            target: linux-x64
+          - os: ubuntu-latest
+            target: linux-arm64
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - run: bun install
+
+      - name: Build binary
+        run: |
+          if [[ "${{ matrix.target }}" == "linux-arm64" ]]; then
+            bun build src/cli.ts --compile --target=bun-linux-arm64 --outfile tend-${{ matrix.target }}
+          else
+            bun build src/cli.ts --compile --outfile tend-${{ matrix.target }}
+          fi
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tend-${{ matrix.target }}
+          path: tend-${{ matrix.target }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: tend-*
+          generate_release_notes: true
