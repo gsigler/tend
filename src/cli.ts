@@ -384,6 +384,69 @@ plantingsCmd
   });
 
 plantingsCmd
+  .command("update <plantingIdOrCrop>")
+  .description("Update planting fields")
+  .option("--crop <name>", "Rename the crop")
+  .option("--variety <variety>", "Update variety")
+  .option("--source <type>", "Source type (seed, start)")
+  .option("--from <vendor>", "Seed vendor")
+  .option("--space <name>", "Move to a different space")
+  .option("--stage <stage>", "Update stage")
+  .option("--date <date>", "Date for stage change")
+  .option("--qty <n>", "Update quantity")
+  .option("--qty-unit <unit>", "Update quantity unit")
+  .option("--grid <n>", "Update grid squares needed")
+  .option("--start-date <date>", "Target start date (or 'none' to clear)")
+  .option("--harden-date <date>", "Target hardening date (or 'none' to clear)")
+  .option("--transplant-date <date>", "Target transplant date (or 'none' to clear)")
+  .option("--notes <text>", "Replace notes")
+  .option("--notes-append <text>", "Append to notes")
+  .action((plantingIdOrCrop, opts) => {
+    try {
+      const input: any = {};
+      let hasUpdate = false;
+
+      if (opts.crop) { input.crop = opts.crop; hasUpdate = true; }
+      if (opts.variety) { input.variety = opts.variety; hasUpdate = true; }
+      if (opts.source) { validateSourceType(opts.source); input.sourceType = opts.source; hasUpdate = true; }
+      if (opts.from) { input.source = opts.from; hasUpdate = true; }
+      if (opts.space) {
+        const spaceId = resolveSpaceId(opts.space);
+        input.spaceId = spaceId ?? null;
+        hasUpdate = true;
+      }
+      if (opts.stage) {
+        validateStage(opts.stage);
+        input.stage = opts.stage;
+        hasUpdate = true;
+      }
+      if (opts.qty) { input.quantity = parseFloat(opts.qty); hasUpdate = true; }
+      if (opts.qtyUnit) { input.quantityUnit = opts.qtyUnit; hasUpdate = true; }
+      if (opts.grid) { input.gridSquares = parseInt(opts.grid); hasUpdate = true; }
+      if (opts.startDate) { input.targetStartDate = opts.startDate === "none" ? null : opts.startDate; hasUpdate = true; }
+      if (opts.hardenDate) { input.targetHardenDate = opts.hardenDate === "none" ? null : opts.hardenDate; hasUpdate = true; }
+      if (opts.transplantDate) { input.targetTransplantDate = opts.transplantDate === "none" ? null : opts.transplantDate; hasUpdate = true; }
+      if (opts.notes) { input.notes = opts.notes; hasUpdate = true; }
+      if (opts.notesAppend) { input.notesAppend = opts.notesAppend; hasUpdate = true; }
+
+      if (!hasUpdate) throw new TendError("INVALID_INPUT", "Nothing to update. Provide at least one option.");
+
+      const planting = garden.updatePlanting(plantingIdOrCrop, input);
+      const spaceMap = buildSpaceMap();
+      const spaceName = planting!.space_id ? spaceMap.get(planting!.space_id) : null;
+      console.log(`Updated: ${cropName(planting!.crop, planting!.variety)}`);
+      if (opts.stage) console.log(`  stage: ${humanize(planting!.stage)}`);
+      if (opts.variety) console.log(`  variety: ${planting!.variety}`);
+      if (opts.from) console.log(`  source: ${planting!.source}`);
+      if (opts.notes || opts.notesAppend) console.log(`  notes: "${planting!.notes}"`);
+      if (opts.startDate) console.log(`  start date: ${planting!.target_start_date ?? "cleared"}`);
+      if (opts.hardenDate) console.log(`  harden date: ${planting!.target_harden_date ?? "cleared"}`);
+      if (opts.transplantDate) console.log(`  transplant date: ${planting!.target_transplant_date ?? "cleared"}`);
+      if (spaceName) console.log(`  → ${spaceName}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+plantingsCmd
   .command("update-stage <plantingIdOrCrop> <stage>")
   .description("Update a planting's stage (by ID or crop name)")
   .option("--date <date>", "Date of stage change")

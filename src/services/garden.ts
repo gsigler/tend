@@ -72,6 +72,60 @@ export function updatePlantingStage(plantingIdOrCrop: string, stage: string, dat
   return planting;
 }
 
+export function findPlantingStrict(seasonId: string, idOrCrop: string) {
+  const db = getDb();
+  // Try by ID first
+  const byId = repo.getPlanting(db, idOrCrop);
+  if (byId) return byId;
+  // Try "crop (variety)" format
+  const parenMatch = idOrCrop.match(/^(.+?)\s*\((.+)\)$/);
+  if (parenMatch) {
+    const [, crop, variety] = parenMatch;
+    const all = repo.findPlantingsByCrop(db, seasonId, crop.trim());
+    const exact = all.filter(p => p.variety?.toLowerCase() === variety.trim().toLowerCase());
+    if (exact.length === 1) return exact[0];
+    if (exact.length > 1) {
+      // Still ambiguous even with variety — shouldn't happen but handle it
+      const lines = exact.map(p => {
+        const spaceName = p.space_id ? (() => { const sp = repo.getSpace(db, p.space_id); return sp ? sp.name : p.space_id; })() : "";
+        const where = spaceName ? ` → ${spaceName}` : "";
+        return `  ${p.id}  ${p.crop} (${p.variety})${where}`;
+      });
+      throw new TendError("CONFLICT", `Multiple plantings match '${idOrCrop}'. Use an ID:\n${lines.join("\n")}`);
+    }
+    // No exact variety match — fall through to crop-only search
+  }
+  // Then by crop name — check for ambiguity
+  const matches = repo.findPlantingsByCrop(db, seasonId, idOrCrop);
+  if (matches.length === 0) throw new TendError("NOT_FOUND", `Planting '${idOrCrop}' not found`);
+  if (matches.length === 1) return matches[0];
+  // Ambiguous
+  const lines = matches.map(p => {
+    const spaceName = p.space_id ? (() => { const sp = repo.getSpace(db, p.space_id); return sp ? sp.name : p.space_id; })() : "";
+    const where = spaceName ? ` → ${spaceName}` : "";
+    const v = p.variety ? ` (${p.variety})` : "";
+    return `  ${p.id}  ${p.crop}${v}${where}`;
+  });
+  throw new TendError("CONFLICT", `Multiple plantings match '${idOrCrop}'. Use an ID:\n${lines.join("\n")}`);
+}
+
+export function updatePlanting(plantingIdOrCrop: string, input: repo.UpdatePlantingInput) {
+  const db = getDb();
+  const config = readConfig();
+  const existing = findPlantingStrict(config.defaultSeasonId, plantingIdOrCrop);
+
+  // If changing space, clear grid placements
+  if (input.spaceId !== undefined && input.spaceId !== existing.space_id) {
+    const cleared = repo.removeGridPlacements(db, existing.id);
+    if (cleared > 0) {
+      console.log("Note: grid placements cleared — use 'tend plantings place' to reassign.");
+    }
+  }
+
+  const updated = repo.updatePlanting(db, existing.id, input);
+  return updated;
+}
+
 export function removePlanting(idOrCrop: string) {
   const db = getDb();
   const config = readConfig();

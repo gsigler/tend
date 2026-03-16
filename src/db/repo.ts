@@ -221,6 +221,69 @@ export function findPlanting(db: Database, seasonId: string, idOrCrop: string): 
   return db.query("SELECT * FROM plantings WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as Planting | null;
 }
 
+export function findPlantingsByCrop(db: Database, seasonId: string, crop: string): Planting[] {
+  return db.query("SELECT * FROM plantings WHERE season_id = ? AND crop = ? ORDER BY created_at DESC").all(seasonId, crop) as Planting[];
+}
+
+export interface UpdatePlantingInput {
+  crop?: string;
+  variety?: string | null;
+  sourceType?: string;
+  source?: string | null;
+  spaceId?: string | null;
+  quantity?: number | null;
+  quantityUnit?: string | null;
+  gridSquares?: number | null;
+  stage?: string;
+  targetStartDate?: string | null;
+  targetHardenDate?: string | null;
+  targetTransplantDate?: string | null;
+  notes?: string | null;
+  notesAppend?: string;
+}
+
+export function updatePlanting(db: Database, id: string, input: UpdatePlantingInput): Planting | null {
+  const now = new Date().toISOString();
+  const sets: string[] = ["updated_at = ?"];
+  const params: any[] = [now];
+
+  if (input.crop !== undefined) { sets.push("crop = ?"); params.push(input.crop); }
+  if (input.variety !== undefined) { sets.push("variety = ?"); params.push(input.variety); }
+  if (input.sourceType !== undefined) { sets.push("source_type = ?"); params.push(input.sourceType); }
+  if (input.source !== undefined) { sets.push("source = ?"); params.push(input.source); }
+  if (input.spaceId !== undefined) { sets.push("space_id = ?"); params.push(input.spaceId); }
+  if (input.quantity !== undefined) { sets.push("quantity = ?"); params.push(input.quantity); }
+  if (input.quantityUnit !== undefined) { sets.push("quantity_unit = ?"); params.push(input.quantityUnit); }
+  if (input.gridSquares !== undefined) { sets.push("grid_squares = ?"); params.push(input.gridSquares); }
+  if (input.stage !== undefined) { sets.push("stage = ?"); params.push(input.stage); }
+  if (input.targetStartDate !== undefined) { sets.push("target_start_date = ?"); params.push(input.targetStartDate); }
+  if (input.targetHardenDate !== undefined) { sets.push("target_harden_date = ?"); params.push(input.targetHardenDate); }
+  if (input.targetTransplantDate !== undefined) { sets.push("target_transplant_date = ?"); params.push(input.targetTransplantDate); }
+  if (input.notes !== undefined) { sets.push("notes = ?"); params.push(input.notes); }
+  if (input.notesAppend !== undefined) {
+    sets.push("notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END");
+    params.push(input.notesAppend, input.notesAppend);
+  }
+
+  // Handle stage date side-effects
+  if (input.stage === "seeded_indoors" || input.stage === "direct_sown") {
+    sets.push("started_at = COALESCE(started_at, ?)");
+    params.push(now);
+  }
+  if (input.stage === "hardening_off") {
+    sets.push("hardened_at = ?");
+    params.push(now);
+  }
+  if (input.stage === "transplanted") {
+    sets.push("transplanted_at = ?");
+    params.push(now);
+  }
+
+  params.push(id);
+  db.run(`UPDATE plantings SET ${sets.join(", ")} WHERE id = ?`, params);
+  return getPlanting(db, id);
+}
+
 export function deletePlanting(db: Database, id: string): void {
   db.run("DELETE FROM events WHERE planting_id = ?", [id]);
   db.run("DELETE FROM tasks WHERE planting_id = ?", [id]);

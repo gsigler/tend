@@ -103,6 +103,75 @@ describe("CLI integration", () => {
     expect(out).toContain("Seedling");
   });
 
+  test("plantings update modifies fields", () => {
+    cli("init --name G --year 2026");
+    cli("spaces add bed-1 --type raised_bed");
+    cli("plantings add tomato --space bed-1 --variety Early-Girl");
+
+    const out = cli("plantings update tomato --notes test-note --from Burpee --start-date 2026-03-01");
+    expect(out).toContain("Updated");
+    expect(out).toContain("tomato");
+
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].notes).toBe("test-note");
+    expect(plantings[0].source).toBe("Burpee");
+    expect(plantings[0].target_start_date).toBe("2026-03-01");
+  });
+
+  test("plantings update resolves by planting ID when ambiguous", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add tomato --variety Early-Girl");
+    cli("plantings add tomato --variety Cherokee-Purple");
+
+    const plantings = cliJson("plantings list --json");
+    const eg = plantings.find((p: any) => p.variety === "Early-Girl");
+
+    const out = cli(`plantings update ${eg.id} --notes picked`);
+    expect(out).toContain("Early-Girl");
+
+    const updated = cliJson("plantings list --json");
+    const egUpdated = updated.find((p: any) => p.variety === "Early-Girl");
+    expect(egUpdated.notes).toBe("picked");
+  });
+
+  test("plantings update errors on ambiguous crop name", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add tomato --variety A");
+    cli("plantings add tomato --variety B");
+
+    let threw = false;
+    try { cli("plantings update tomato --notes test"); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test("plantings update clears date with none", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add basil --start-date 2026-04-01");
+
+    cli("plantings update basil --start-date none");
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].target_start_date).toBeNull();
+  });
+
+  test("plantings update notes-append", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add basil --notes first");
+
+    cli("plantings update basil --notes-append second");
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].notes).toContain("first");
+    expect(plantings[0].notes).toContain("second");
+  });
+
+  test("plantings update errors with no options", () => {
+    cli("init --name G --year 2026");
+    cli("plantings add basil");
+
+    let threw = false;
+    try { cli("plantings update basil"); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
   test("plantings remove", () => {
     cli("init --name G --year 2026");
     cli("plantings add tomato --stage planned");

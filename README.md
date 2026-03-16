@@ -103,10 +103,16 @@ tend plantings list --space bed-1
 tend plantings list --stage producing
 tend plantings list --json
 
-# Update stage (by ID or crop name) — automatically sets date fields
+# Update fields (by ID, crop name, or "crop (variety)")
+tend plantings update tomato --notes "75 days to harvest"
+tend plantings update "tomato (Early Girl)" --variety "Early Girl Improved" --from Burpee
+tend plantings update tomato --stage seeded_indoors --start-date 2026-03-01
+tend plantings update tomato --space bed-2           # clears grid placements
+tend plantings update tomato --notes-append "4 of 6 germinated"
+tend plantings update tomato --start-date none       # clear a date
+
+# Update stage shorthand (still available)
 tend plantings update-stage tomato seeded_indoors --date 2026-03-01
-tend plantings update-stage tomato hardening_off --date 2026-04-15
-tend plantings update-stage tomato transplanted --date 2026-05-01
 
 # View schedule (grouped by overdue/upcoming/done)
 tend plantings schedule

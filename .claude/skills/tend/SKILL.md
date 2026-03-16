@@ -32,7 +32,11 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
   - Schedule: `--start-date`, `--harden-date`, `--transplant-date` (target dates)
   - Grid: `--at A1,A2,B1,B2` (auto-place on grid, requires `--space`)
 - `tend plantings list` — List plantings (filter: `--space`, `--stage`, `--crop`)
-- `tend plantings update-stage <crop> <stage>` — Update stage (by crop name or ID)
+- `tend plantings update <crop>` — Update any planting fields (by ID, crop name, or "crop (variety)")
+  - Options: `--crop`, `--variety`, `--source` (seed/start), `--from` (vendor), `--space` (clears grid placements), `--stage`, `--qty`, `--qty-unit`, `--grid`, `--notes`, `--notes-append`
+  - Schedule: `--start-date`, `--harden-date`, `--transplant-date` (use `none` to clear)
+  - If crop name is ambiguous (multiple matches), errors with list of IDs
+- `tend plantings update-stage <crop> <stage>` — Shorthand for stage updates (by crop name or ID)
   - Stages: planned → seeded_indoors → seedling → hardening_off → direct_sown → transplanted → producing → finished → failed
   - Automatically sets `started_at`, `hardened_at`, or `transplanted_at` when reaching those stages
 - `tend plantings schedule` — View schedule (overdue/upcoming/done based on target dates)
