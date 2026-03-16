@@ -176,8 +176,7 @@ export function getSummary(seasonId: string) {
   const spaces = repo.listSpaces(db, seasonId);
   const plantings = repo.listPlantings(db, seasonId);
   const openTasks = repo.listTasks(db, seasonId, { status: "open" });
-  const seedPlans = repo.listSeedPlans(db, seasonId);
-  return { garden, season, spaces, plantings, openTasks, seedPlans };
+  return { garden, season, spaces, plantings, openTasks };
 }
 
 // --- Week ---
@@ -214,92 +213,44 @@ export function getWeekPlan(seasonId: string) {
     }
   }
 
-  // Seed plan actions due this week
-  const planStartsDue = repo.seedPlansNeedingAction(db, seasonId, nextWeek);
-  const planHardenDue = repo.seedPlansNeedingHarden(db, seasonId, nextWeek);
-  const planTransplantDue = repo.seedPlansNeedingTransplant(db, seasonId, nextWeek);
+  // Schedule actions from plantings with target dates
+  const startsDue = repo.plantingsNeedingStart(db, seasonId, nextWeek);
+  const hardenDue = repo.plantingsNeedingHarden(db, seasonId, nextWeek);
+  const transplantDue = repo.plantingsNeedingTransplant(db, seasonId, nextWeek);
 
-  const planActions: { action: string; plan: repo.SeedPlan; targetDate: string }[] = [];
-  for (const p of planStartsDue) {
-    const overdue = p.target_start_date! < today;
-    planActions.push({ action: overdue ? "OVERDUE: Start seeds" : "Start seeds", plan: p, targetDate: p.target_start_date! });
+  const scheduleActions: { action: string; planting: repo.Planting; targetDate: string }[] = [];
+  for (const p of startsDue) {
+    const isOverdue = p.target_start_date! < today;
+    scheduleActions.push({ action: isOverdue ? "OVERDUE: Start seeds" : "Start seeds", planting: p, targetDate: p.target_start_date! });
   }
-  for (const p of planHardenDue) {
-    const overdue = p.target_harden_date! < today;
-    planActions.push({ action: overdue ? "OVERDUE: Begin hardening" : "Begin hardening", plan: p, targetDate: p.target_harden_date! });
+  for (const p of hardenDue) {
+    const isOverdue = p.target_harden_date! < today;
+    scheduleActions.push({ action: isOverdue ? "OVERDUE: Begin hardening" : "Begin hardening", planting: p, targetDate: p.target_harden_date! });
   }
-  for (const p of planTransplantDue) {
-    const overdue = p.target_transplant_date! < today;
-    planActions.push({ action: overdue ? "OVERDUE: Transplant" : "Transplant", plan: p, targetDate: p.target_transplant_date! });
+  for (const p of transplantDue) {
+    const isOverdue = p.target_transplant_date! < today;
+    scheduleActions.push({ action: isOverdue ? "OVERDUE: Transplant" : "Transplant", planting: p, targetDate: p.target_transplant_date! });
   }
-  planActions.sort((a, b) => a.targetDate.localeCompare(b.targetDate));
+  scheduleActions.sort((a, b) => a.targetDate.localeCompare(b.targetDate));
 
-  return { overdue, thisWeek, noDue, suggestions, planActions };
+  return { overdue, thisWeek, noDue, suggestions, scheduleActions };
 }
 
-// --- Seed Plans ---
+// --- Schedule ---
 
-export function addSeedPlan(input: repo.CreateSeedPlanInput) {
+export function getPlantingSchedule(seasonId: string) {
   const db = getDb();
-  return repo.createSeedPlan(db, input);
-}
-
-export function listSeedPlans(seasonId: string, filters?: { status?: string; startType?: string }) {
-  const db = getDb();
-  return repo.listSeedPlans(db, seasonId, filters);
-}
-
-export function updateSeedPlanStatus(planIdOrCrop: string, status: string, date?: string) {
-  const db = getDb();
-  const config = readConfig();
-  const existing = repo.findSeedPlan(db, config.defaultSeasonId, planIdOrCrop);
-  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planIdOrCrop}' not found`);
-  const planId = existing.id;
-
-  const dateFieldMap: Record<string, string> = {
-    started: "started_at",
-    hardening: "hardened_at",
-    transplanted: "transplanted_at",
-    direct_sown: "started_at",
-  };
-
-  const dateField = dateFieldMap[status];
-  const plan = repo.updateSeedPlanStatus(db, planId, status,
-    dateField ? { field: dateField, value: date ?? new Date().toISOString().split("T")[0] } : undefined
-  );
-
-  const eventDate = date ?? new Date().toISOString().split("T")[0];
-  repo.createEvent(db, {
-    seasonId: existing.season_id,
-    spaceId: existing.space_id ?? undefined,
-    type: "stage_changed",
-    happenedAt: eventDate,
-    summary: `Seed plan: ${existing.crop}${existing.variety ? ` (${existing.variety})` : ""} → ${status}`,
-  });
-
-  return plan;
-}
-
-export function removeSeedPlan(planIdOrCrop: string) {
-  const db = getDb();
-  const config = readConfig();
-  const existing = repo.findSeedPlan(db, config.defaultSeasonId, planIdOrCrop);
-  if (!existing) throw new TendError("NOT_FOUND", `Seed plan '${planIdOrCrop}' not found`);
-  repo.deleteSeedPlan(db, existing.id);
-  return existing;
-}
-
-export function getSeedSchedule(seasonId: string) {
-  const db = getDb();
-  const plans = repo.listSeedPlans(db, seasonId);
+  const plantings = repo.listScheduledPlantings(db, seasonId);
   const today = new Date().toISOString().split("T")[0];
 
-  const upcoming: (repo.SeedPlan & { next_action: string; next_date: string })[] = [];
-  const overdue: (repo.SeedPlan & { next_action: string; next_date: string })[] = [];
-  const done: repo.SeedPlan[] = [];
+  const upcoming: (repo.Planting & { next_action: string; next_date: string })[] = [];
+  const overdueList: (repo.Planting & { next_action: string; next_date: string })[] = [];
+  const done: repo.Planting[] = [];
 
-  for (const p of plans) {
-    if (p.status === "done" || p.status === "skipped" || p.status === "transplanted" || p.status === "direct_sown") {
+  const finishedStages = ["finished", "failed", "producing", "transplanted", "direct_sown"];
+
+  for (const p of plantings) {
+    if (finishedStages.includes(p.stage)) {
       done.push(p);
       continue;
     }
@@ -307,13 +258,13 @@ export function getSeedSchedule(seasonId: string) {
     let nextAction: string | null = null;
     let nextDate: string | null = null;
 
-    if (p.status === "planned" && p.target_start_date) {
-      nextAction = p.start_type === "indoor" ? "Start indoors" : "Direct sow";
+    if (p.stage === "planned" && p.target_start_date) {
+      nextAction = p.source_type === "seed" ? "Start indoors" : "Direct sow";
       nextDate = p.target_start_date;
-    } else if (p.status === "started" && p.target_harden_date) {
+    } else if ((p.stage === "seeded_indoors" || p.stage === "seedling") && p.target_harden_date) {
       nextAction = "Begin hardening off";
       nextDate = p.target_harden_date;
-    } else if ((p.status === "started" || p.status === "hardening") && p.target_transplant_date) {
+    } else if ((p.stage === "seeded_indoors" || p.stage === "seedling" || p.stage === "hardening_off") && p.target_transplant_date) {
       nextAction = "Transplant";
       nextDate = p.target_transplant_date;
     }
@@ -321,7 +272,7 @@ export function getSeedSchedule(seasonId: string) {
     if (nextAction && nextDate) {
       const entry = { ...p, next_action: nextAction, next_date: nextDate };
       if (nextDate < today) {
-        overdue.push(entry);
+        overdueList.push(entry);
       } else {
         upcoming.push(entry);
       }
@@ -330,58 +281,57 @@ export function getSeedSchedule(seasonId: string) {
     }
   }
 
-  overdue.sort((a, b) => a.next_date.localeCompare(b.next_date));
+  overdueList.sort((a, b) => a.next_date.localeCompare(b.next_date));
   upcoming.sort((a, b) => (a.next_date || "9999").localeCompare(b.next_date || "9999"));
 
-  return { overdue, upcoming, done };
+  return { overdue: overdueList, upcoming, done };
 }
 
-export function generateTasksFromPlans(seasonId: string) {
+export function generateTasksFromSchedule(seasonId: string) {
   const db = getDb();
-  const plans = repo.listSeedPlans(db, seasonId);
+  const plantings = repo.listScheduledPlantings(db, seasonId);
   const existingTasks = repo.listTasks(db, seasonId);
   const created: repo.Task[] = [];
 
-  for (const p of plans) {
-    // Check if task already exists for this plan action
-    const hasPlanTask = (keyword: string, dueAt: string | null) =>
+  for (const p of plantings) {
+    const hasTask = (keyword: string) =>
       existingTasks.some(t => t.notes?.includes(p.id) && t.title.includes(keyword) && t.status === "open");
 
-    if (p.status === "planned" && p.target_start_date) {
-      const action = p.start_type === "indoor" ? "Start indoors" : "Direct sow";
+    if (p.stage === "planned" && p.target_start_date) {
+      const action = p.source_type === "seed" ? "Start indoors" : "Direct sow";
       const title = `${action}: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
-      if (!hasPlanTask(p.crop, p.target_start_date)) {
+      if (!hasTask(p.crop)) {
         const task = repo.createTask(db, {
           seasonId, spaceId: p.space_id ?? undefined,
           title, type: "seed_start", priority: "high",
           dueAt: p.target_start_date,
-          notes: `Auto-generated from seed plan ${p.id}. Qty: ${p.qty_to_start ?? "?"}`,
+          notes: `Auto-generated from planting ${p.id}. Qty: ${p.quantity ?? "?"}`,
         });
         created.push(task);
       }
     }
 
-    if (p.status === "started" && p.target_harden_date) {
+    if ((p.stage === "seeded_indoors" || p.stage === "seedling") && p.target_harden_date) {
       const title = `Begin hardening: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
-      if (!hasPlanTask(p.crop, p.target_harden_date)) {
+      if (!hasTask(p.crop)) {
         const task = repo.createTask(db, {
           seasonId, spaceId: p.space_id ?? undefined,
           title, type: "maintenance", priority: "medium",
           dueAt: p.target_harden_date,
-          notes: `Auto-generated from seed plan ${p.id}`,
+          notes: `Auto-generated from planting ${p.id}`,
         });
         created.push(task);
       }
     }
 
-    if ((p.status === "started" || p.status === "hardening") && p.target_transplant_date) {
+    if ((p.stage === "seeded_indoors" || p.stage === "seedling" || p.stage === "hardening_off") && p.target_transplant_date) {
       const title = `Transplant: ${p.crop}${p.variety ? ` (${p.variety})` : ""}`;
-      if (!hasPlanTask(p.crop, p.target_transplant_date)) {
+      if (!hasTask(p.crop)) {
         const task = repo.createTask(db, {
           seasonId, spaceId: p.space_id ?? undefined,
           title, type: "transplant", priority: "high",
           dueAt: p.target_transplant_date,
-          notes: `Auto-generated from seed plan ${p.id}. Grid squares: ${p.grid_squares ?? "?"}`,
+          notes: `Auto-generated from planting ${p.id}. Grid squares: ${p.grid_squares ?? "?"}`,
         });
         created.push(task);
       }

@@ -46,13 +46,11 @@ tend init --name "My Garden" --year 2026
 
 **Space** — A physical growing location: raised bed, tray, container, shelf, etc. Spaces have optional dimensions and layout modes. Spaces with dimensions support grid placement for mapping where plantings are located.
 
-**Planting** — A crop in a space, tracked through growth stages from `planned` → `seeded_indoors` → `seedling` → `hardening_off` → `transplanted` → `producing` → `finished`.
+**Planting** — A crop tracked through its entire lifecycle from planning to harvest. Plantings can have target schedule dates (start, harden, transplant) and grid coordinates — the plan *is* the planting from day one.
 
 **Task** — Something to do, with optional due dates, priority levels, and space associations. Defaults to showing only open tasks.
 
 **Event** — An immutable journal entry. Every mutation (planting, stage change, task completion) automatically creates an event, and you can log observations manually.
-
-**Seed Plan** — A seed starting schedule entry with target dates for starting, hardening, and transplanting. Can auto-generate tasks.
 
 ## Commands
 
@@ -89,10 +87,14 @@ tend spaces map bed-1 --json
 ### Plantings
 
 ```bash
-# Add plantings
+# Add plantings (with optional schedule dates and grid placement)
+tend plantings add tomato --variety "San Marzano" --from Burpee --qty 12 --grid 4 \
+  --space bed-1 --start-date 2026-03-01 --harden-date 2026-04-15 --transplant-date 2026-05-01
 tend plantings add peas --space bed-1 --source seed --stage direct_sown --date 2026-03-15
 tend plantings add lettuce --space bed-1 --variety buttercrunch --source start --stage transplanted
-tend plantings add tomato --stage seeded_indoors --qty 6 --qty-unit plants
+
+# Add with auto-placement on grid
+tend plantings add tomato --space bed-1 --at A1,A2,B1,B2 --start-date 2026-03-01
 
 # List (with filters)
 tend plantings list
@@ -101,11 +103,17 @@ tend plantings list --space bed-1
 tend plantings list --stage producing
 tend plantings list --json
 
-# Update stage (by ID or crop name)
-tend plantings update-stage tomato seedling --date 2026-04-01
+# Update stage (by ID or crop name) — automatically sets date fields
+tend plantings update-stage tomato seeded_indoors --date 2026-03-01
+tend plantings update-stage tomato hardening_off --date 2026-04-15
+tend plantings update-stage tomato transplanted --date 2026-05-01
 
-# Remove (by ID or crop name)
-tend plantings remove tomato
+# View schedule (grouped by overdue/upcoming/done)
+tend plantings schedule
+tend plantings schedule --json
+
+# Auto-generate tasks from schedule dates (idempotent — won't duplicate)
+tend plantings generate-tasks
 
 # Place on grid (assigns cells within a space)
 tend plantings place tomato --space bed-1 --at A1,A2,B1,B2
@@ -113,6 +121,9 @@ tend plantings place pepper --space bed-1 --at A3,B3
 
 # Remove from grid
 tend plantings unplace tomato
+
+# Remove (by ID or crop name)
+tend plantings remove tomato
 ```
 
 **Stages:** `planned` → `seeded_indoors` → `seedling` → `hardening_off` → `direct_sown` → `transplanted` → `producing` → `finished` → `failed`
@@ -168,41 +179,6 @@ tend events list --json
 
 **Event types:** `created`, `seeded`, `transplanted`, `observed`, `harvested`, `task_completed`, `health_changed`, `stage_changed`, `note`
 
-### Seed Starting Plan
-
-Plan your entire seed starting schedule with target dates, then auto-generate tasks.
-
-```bash
-# Add plans
-tend plan add tomato --variety "San Marzano" --source Burpee --qty 12 --grid 4 \
-  --space bed-1 --start-date 2026-03-01 --harden-date 2026-04-15 --transplant-date 2026-05-01
-
-tend plan add peas --start-type direct_sow --qty 30 --start-date 2026-03-20
-
-# List all plans (detailed view with dates and progress)
-tend plan list
-tend plan list --json
-
-# View schedule (grouped by overdue/upcoming/done)
-tend plan schedule
-tend plan schedule --json
-
-# Update status as you progress (by ID or crop name)
-tend plan update tomato started --date 2026-03-01
-tend plan update tomato hardening --date 2026-04-15
-tend plan update tomato transplanted --date 2026-05-01
-
-# Auto-generate tasks from plan dates (idempotent — won't duplicate)
-tend plan generate-tasks
-
-# Remove a plan
-tend plan remove tomato
-```
-
-**Start types:** `indoor`, `direct_sow`
-
-**Plan statuses:** `planned` → `started` → `hardening` → `transplanted` / `direct_sown` → `done` / `skipped`
-
 ### Seasons
 
 ```bash
@@ -218,7 +194,7 @@ tend season use <season-id>
 tend summary
 tend summary --json
 
-# Weekly work plan (overdue tasks, this week's tasks, suggestions, seed plan actions)
+# Weekly work plan (overdue tasks, this week's tasks, suggestions, schedule actions)
 tend week
 tend week --json
 ```
@@ -227,7 +203,7 @@ The `week` command intelligently surfaces:
 - **Overdue tasks** — past their due date
 - **This week's tasks** — due in the next 7 days
 - **Suggested checks** — seedlings, hardening plants, or producing crops with no events in 7+ days
-- **Seed plan actions** — starts, hardening, and transplants due soon
+- **Schedule actions** — plantings needing starts, hardening, or transplants based on target dates
 
 ## JSON Output
 
@@ -236,7 +212,7 @@ Every read command supports `--json` for structured output, making it easy to pi
 ```bash
 tend summary --json | jq '.plantings[] | .crop'
 tend tasks list --json | jq '[.[] | select(.priority == "high")]'
-tend plan schedule --json | jq '.overdue'
+tend plantings schedule --json | jq '.overdue'
 ```
 
 ## Name-Based Lookups
@@ -251,7 +227,7 @@ tend plantings update-stage planting_abc123 seedling  # by ID
 tend tasks done "Water"                           # partial title match
 tend tasks done task_abc123                       # by ID
 
-tend plan update basil started                    # by crop name
+tend plantings update-stage basil seeded_indoors   # by crop name
 ```
 
 ## Data Storage
@@ -261,7 +237,7 @@ Everything is stored locally in `~/.tend/`:
 ```
 ~/.tend/
 ├── config.json    # active garden/season, units preference
-└── tend.db        # SQLite database (8 tables)
+└── tend.db        # SQLite database (7 tables)
 ```
 
 ### Database Schema
@@ -271,10 +247,9 @@ Everything is stored locally in `~/.tend/`:
 | `gardens` | Garden identity (name) |
 | `seasons` | Growing years with frost dates |
 | `spaces` | Physical growing locations |
-| `plantings` | Crops tracked through growth stages |
+| `plantings` | Crops tracked through growth stages, with schedule dates and grid placement |
 | `events` | Immutable activity journal |
 | `tasks` | To-do items with priority and due dates |
-| `seed_plans` | Seed starting schedule with target dates |
 | `grid_placements` | Coordinate-based placement of plantings within spaces |
 
 ## Development
@@ -283,7 +258,7 @@ Everything is stored locally in `~/.tend/`:
 # Run directly
 bun run src/cli.ts <command>
 
-# Run tests (62 tests across 4 files)
+# Run tests (59 tests across 4 files)
 bun test
 
 # Type check
@@ -309,7 +284,7 @@ src/
 │   ├── connection.ts     # SQLite connection + config management
 │   ├── ids.ts            # ID generation
 │   ├── repo.ts           # Data access layer (CRUD for all tables)
-│   └── schema.ts         # DDL for all 8 tables
+│   └── schema.ts         # DDL for all 7 tables
 └── services/
     ├── errors.ts         # TendError class
     └── garden.ts         # Business logic (summary, week plan, scheduling)
@@ -318,7 +293,7 @@ test/
 ├── cli.test.ts           # 26 end-to-end CLI integration tests
 ├── repo.test.ts          # 17 repository unit tests
 ├── services.test.ts      # 4 service logic tests
-├── plan.test.ts          # 15 seed plan tests
+├── plan.test.ts          # 11 planting schedule tests
 └── helpers.ts            # Test utilities
 ```
 

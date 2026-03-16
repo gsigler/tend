@@ -10,7 +10,7 @@ import { handleError, output } from "./commands/output";
 import { TendError } from "./services/errors";
 import {
   validateSpaceType, validateLayoutMode, validateSourceType, validateStage,
-  validateTaskType, validatePriority, validateEventType, validateStartType, validatePlanStatus,
+  validateTaskType, validatePriority, validateEventType,
 } from "./commands/validate";
 import { humanize, relativeDate, shortDate, pad, cropName, header, priorityIcon } from "./commands/format";
 import { parseCoords, validateCoords, formatCoord, buildGridData, renderAsciiMap, buildMapJson } from "./commands/grid";
@@ -20,7 +20,7 @@ const program = new Command();
 program
   .name("tend")
   .description("Local-first CLI for tracking and managing a personal garden")
-  .version("0.1.0");
+  .version("0.2.0");
 
 // Helper to resolve space name → ID
 function resolveSpaceId(spaceName?: string): string | undefined {
@@ -96,16 +96,8 @@ program
           for (const p of data.plantings) {
             const spaceName = p.space_id ? spaceMap.get(p.space_id) : null;
             const where = spaceName ? `  → ${spaceName}` : "";
-            console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.stage), 16)} ${humanize(p.health)}${where}`);
-          }
-        }
-
-        if (data.seedPlans.length > 0) {
-          const active = data.seedPlans.filter(p => !["done", "skipped", "transplanted", "direct_sown"].includes(p.status));
-          console.log(header(`Seed Plans (${active.length} active)`));
-          for (const p of active) {
-            const date = p.target_start_date ? `  start ${relativeDate(p.target_start_date)}` : "";
-            console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.status), 12)}${date}`);
+            const sched = p.target_start_date ? `  start ${relativeDate(p.target_start_date)}` : "";
+            console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.stage), 16)} ${humanize(p.health)}${where}${sched}`);
           }
         }
 
@@ -164,19 +156,19 @@ program
           console.log("\n  SUGGESTED CHECKS");
           for (const s of plan.suggestions) console.log(`   →  ${s}`);
         }
-        // Deduplicate plan actions that already have tasks
+        // Deduplicate schedule actions that already have tasks
         const taskTitles = new Set([...plan.overdue, ...plan.thisWeek].map(t => t.title));
-        const uniquePlanActions = plan.planActions.filter(a => {
-          const verb = a.action.replace("OVERDUE: ", "").replace("Start seeds", a.plan.start_type === "indoor" ? "Start indoors" : "Direct sow");
-          const expectedTitle = `${verb}: ${a.plan.crop}${a.plan.variety ? ` (${a.plan.variety})` : ""}`;
+        const uniqueActions = plan.scheduleActions.filter(a => {
+          const verb = a.action.replace("OVERDUE: ", "").replace("Start seeds", a.planting.source_type === "seed" ? "Start indoors" : "Direct sow");
+          const expectedTitle = `${verb}: ${a.planting.crop}${a.planting.variety ? ` (${a.planting.variety})` : ""}`;
           return !taskTitles.has(expectedTitle);
         });
-        if (uniquePlanActions.length > 0) {
+        if (uniqueActions.length > 0) {
           empty = false;
-          console.log("\n  SEED PLAN ACTIONS");
-          for (const a of uniquePlanActions) {
-            const name = cropName(a.plan.crop, a.plan.variety);
-            const qty = a.plan.qty_to_start ? ` ×${a.plan.qty_to_start}` : "";
+          console.log("\n  SCHEDULE");
+          for (const a of uniqueActions) {
+            const name = cropName(a.planting.crop, a.planting.variety);
+            const qty = a.planting.quantity ? ` ×${a.planting.quantity}` : "";
             console.log(`   →  ${a.action}: ${name}${qty}  ${relativeDate(a.targetDate)}`);
           }
         }
@@ -309,10 +301,16 @@ plantingsCmd
   .option("--space <name>", "Space name")
   .option("--variety <variety>", "Variety")
   .option("--source <type>", "Source type (seed, start)", "seed")
+  .option("--from <vendor>", "Seed vendor/source (e.g. Burpee, Johnny's)")
   .option("--stage <stage>", "Stage", "planned")
   .option("--qty <n>", "Quantity")
   .option("--qty-unit <unit>", "Quantity unit")
+  .option("--grid <n>", "Grid squares needed")
   .option("--date <date>", "Start date")
+  .option("--start-date <date>", "Target start date (YYYY-MM-DD)")
+  .option("--harden-date <date>", "Target hardening date (YYYY-MM-DD)")
+  .option("--transplant-date <date>", "Target transplant date (YYYY-MM-DD)")
+  .option("--at <coords>", "Grid coordinates to place (e.g. A1,A2,B1,B2)")
   .option("--notes <text>", "Notes")
   .action((crop, opts) => {
     try {
@@ -326,13 +324,34 @@ plantingsCmd
         crop,
         variety: opts.variety,
         sourceType: opts.source,
+        source: opts.from,
         stage: opts.stage,
         quantity: opts.qty ? parseFloat(opts.qty) : undefined,
         quantityUnit: opts.qtyUnit,
+        gridSquares: opts.grid ? parseInt(opts.grid) : undefined,
         startedAt: opts.date,
+        targetStartDate: opts.startDate,
+        targetHardenDate: opts.hardenDate,
+        targetTransplantDate: opts.transplantDate,
         notes: opts.notes,
       });
       console.log(`Added: ${cropName(planting.crop, planting.variety)} [${humanize(planting.stage)}]`);
+      if (planting.target_start_date) console.log(`  Start:      ${relativeDate(planting.target_start_date)}`);
+      if (planting.target_harden_date) console.log(`  Harden:     ${relativeDate(planting.target_harden_date)}`);
+      if (planting.target_transplant_date) console.log(`  Transplant: ${relativeDate(planting.target_transplant_date)}`);
+
+      // Auto-place on grid if --at provided
+      if (opts.at && opts.space) {
+        const cells = parseCoords(opts.at);
+        const db = getDb();
+        const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
+        if (space) {
+          validateCoords(space, cells);
+          garden.placePlanting(config.defaultSeasonId, planting.id, opts.space, cells);
+          const coordStr = cells.map(c => formatCoord(c.row, c.col)).join(", ");
+          console.log(`  Placed at ${coordStr} in ${opts.space}`);
+        }
+      }
     } catch (e) { handleError(e, false); }
   });
 
@@ -413,6 +432,65 @@ plantingsCmd
       const config = readConfig();
       const result = garden.unplacePlanting(config.defaultSeasonId, crop);
       console.log(`Removed ${cropName(result.planting.crop, result.planting.variety)} from grid (${result.removedCount} cell(s))`);
+    } catch (e) { handleError(e, false); }
+  });
+
+plantingsCmd
+  .command("schedule")
+  .description("Show planting schedule with next actions")
+  .option("--json", "Output as JSON", false)
+  .action((opts) => {
+    try {
+      const config = readConfig();
+      const schedule = garden.getPlantingSchedule(config.defaultSeasonId);
+      if (opts.json) {
+        output(schedule, true);
+      } else {
+        console.log(header("Planting Schedule"));
+        if (schedule.overdue.length > 0) {
+          console.log("\n  OVERDUE");
+          for (const p of schedule.overdue) {
+            const qty = p.quantity ? ` ×${p.quantity}` : "";
+            console.log(`  !!  ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${relativeDate(p.next_date)}`);
+          }
+        }
+        if (schedule.upcoming.length > 0) {
+          console.log("\n  UPCOMING");
+          for (const p of schedule.upcoming) {
+            const qty = p.quantity ? ` ×${p.quantity}` : "";
+            const date = p.next_date ? relativeDate(p.next_date) : "no date set";
+            console.log(`      ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${date}`);
+          }
+        }
+        if (schedule.done.length > 0) {
+          console.log(`\n  DONE (${schedule.done.length})`);
+          for (const p of schedule.done) {
+            console.log(`   ✓  ${cropName(p.crop, p.variety)} [${humanize(p.stage)}]`);
+          }
+        }
+        if (schedule.overdue.length === 0 && schedule.upcoming.length === 0 && schedule.done.length === 0) {
+          console.log("\n  No scheduled plantings. Add one with: tend plantings add <crop> --start-date <date>");
+        }
+        console.log("");
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
+plantingsCmd
+  .command("generate-tasks")
+  .description("Auto-generate tasks from planting schedule dates")
+  .action(() => {
+    try {
+      const config = readConfig();
+      const created = garden.generateTasksFromSchedule(config.defaultSeasonId);
+      if (created.length === 0) {
+        console.log("No new tasks to generate.");
+      } else {
+        console.log(`Generated ${created.length} task(s):`);
+        for (const t of created) {
+          console.log(`  ${priorityIcon(t.priority)} ${t.title}  ${t.due_at ? relativeDate(t.due_at) : ""}`);
+        }
+      }
     } catch (e) { handleError(e, false); }
   });
 
@@ -571,173 +649,6 @@ program
         dataJson: opts.data,
       });
       console.log(`Logged: [${humanize(event.type)}] ${event.summary}`);
-    } catch (e) { handleError(e, false); }
-  });
-
-// --- plan ---
-const planCmd = program.command("plan").description("Manage seed starting schedule");
-
-planCmd
-  .command("add <crop>")
-  .description("Add a crop to the seed starting plan")
-  .option("--variety <variety>", "Variety name")
-  .option("--source <source>", "Seed source (e.g. Burpee, Johnny's)")
-  .option("--start-type <type>", "Start type (indoor, direct_sow)", "indoor")
-  .option("--qty <n>", "Number of seeds to start")
-  .option("--grid <n>", "Garden grid squares needed")
-  .option("--space <name>", "Target space name")
-  .option("--start-date <date>", "Target start date (YYYY-MM-DD)")
-  .option("--harden-date <date>", "Target hardening date (YYYY-MM-DD)")
-  .option("--transplant-date <date>", "Target transplant date (YYYY-MM-DD)")
-  .option("--notes <text>", "Notes")
-  .action((crop, opts) => {
-    try {
-      validateStartType(opts.startType);
-      const config = readConfig();
-      const spaceId = resolveSpaceId(opts.space);
-      const plan = garden.addSeedPlan({
-        seasonId: config.defaultSeasonId,
-        crop,
-        variety: opts.variety,
-        source: opts.source,
-        startType: opts.startType,
-        qtyToStart: opts.qty ? parseInt(opts.qty) : undefined,
-        gridSquares: opts.grid ? parseInt(opts.grid) : undefined,
-        spaceId,
-        targetStartDate: opts.startDate,
-        targetHardenDate: opts.hardenDate,
-        targetTransplantDate: opts.transplantDate,
-        notes: opts.notes,
-      });
-      console.log(`Added to plan: ${cropName(plan.crop, plan.variety)} [${humanize(plan.start_type)}]`);
-      if (plan.target_start_date) console.log(`  Start:      ${relativeDate(plan.target_start_date)}`);
-      if (plan.target_harden_date) console.log(`  Harden:     ${relativeDate(plan.target_harden_date)}`);
-      if (plan.target_transplant_date) console.log(`  Transplant: ${relativeDate(plan.target_transplant_date)}`);
-    } catch (e) { handleError(e, false); }
-  });
-
-planCmd
-  .command("list")
-  .description("List all seed plans")
-  .option("--status <status>", "Filter by status")
-  .option("--start-type <type>", "Filter by start type")
-  .option("--json", "Output as JSON", false)
-  .action((opts) => {
-    try {
-      const config = readConfig();
-      const plans = garden.listSeedPlans(config.defaultSeasonId, { status: opts.status, startType: opts.startType });
-      if (opts.json) {
-        output(plans, true);
-      } else {
-        if (plans.length === 0) { console.log("No seed plans found."); return; }
-        const spaceMap = buildSpaceMap();
-        console.log("");
-        for (let i = 0; i < plans.length; i++) {
-          const p = plans[i];
-          const src = p.source ? `  from ${p.source}` : "";
-          const qty = p.qty_to_start ? `  ×${p.qty_to_start}` : "";
-          const grid = p.grid_squares ? `  [${p.grid_squares} sq]` : "";
-          const spaceName = p.space_id ? spaceMap.get(p.space_id) : null;
-          const where = spaceName ? `  → ${spaceName}` : "";
-          console.log(`  #${i + 1}  ${cropName(p.crop, p.variety)}${src}${qty}${grid}${where}`);
-          console.log(`      ${humanize(p.start_type)} • ${humanize(p.status)}`);
-          if (p.target_start_date) {
-            const done = p.started_at ? ` ✓ ${shortDate(p.started_at)}` : "";
-            console.log(`      Start:      ${relativeDate(p.target_start_date)}${done}`);
-          }
-          if (p.target_harden_date) {
-            const done = p.hardened_at ? ` ✓ ${shortDate(p.hardened_at)}` : "";
-            console.log(`      Harden:     ${relativeDate(p.target_harden_date)}${done}`);
-          }
-          if (p.target_transplant_date) {
-            const done = p.transplanted_at ? ` ✓ ${shortDate(p.transplanted_at)}` : "";
-            console.log(`      Transplant: ${relativeDate(p.target_transplant_date)}${done}`);
-          }
-          if (p.notes) console.log(`      Note: ${p.notes}`);
-          console.log("");
-        }
-      }
-    } catch (e) { handleError(e, opts.json); }
-  });
-
-planCmd
-  .command("schedule")
-  .description("Show seed starting schedule with next actions")
-  .option("--json", "Output as JSON", false)
-  .action((opts) => {
-    try {
-      const config = readConfig();
-      const schedule = garden.getSeedSchedule(config.defaultSeasonId);
-      if (opts.json) {
-        output(schedule, true);
-      } else {
-        console.log(header("Seed Starting Schedule"));
-        if (schedule.overdue.length > 0) {
-          console.log("\n  OVERDUE");
-          for (const p of schedule.overdue) {
-            const qty = p.qty_to_start ? ` ×${p.qty_to_start}` : "";
-            console.log(`  !!  ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${relativeDate(p.next_date)}`);
-          }
-        }
-        if (schedule.upcoming.length > 0) {
-          console.log("\n  UPCOMING");
-          for (const p of schedule.upcoming) {
-            const qty = p.qty_to_start ? ` ×${p.qty_to_start}` : "";
-            const date = p.next_date ? relativeDate(p.next_date) : "no date set";
-            console.log(`      ${pad(p.next_action, 22)} ${pad(cropName(p.crop, p.variety), 28)}${qty}  ${date}`);
-          }
-        }
-        if (schedule.done.length > 0) {
-          console.log(`\n  DONE (${schedule.done.length})`);
-          for (const p of schedule.done) {
-            console.log(`   ✓  ${cropName(p.crop, p.variety)} [${humanize(p.status)}]`);
-          }
-        }
-        if (schedule.overdue.length === 0 && schedule.upcoming.length === 0 && schedule.done.length === 0) {
-          console.log("\n  No seed plans yet. Add one with: tend plan add <crop>");
-        }
-        console.log("");
-      }
-    } catch (e) { handleError(e, opts.json); }
-  });
-
-planCmd
-  .command("update <planIdOrCrop> <status>")
-  .description("Update a seed plan status (by ID or crop name)")
-  .option("--date <date>", "Date of status change (YYYY-MM-DD)")
-  .action((planIdOrCrop, status, opts) => {
-    try {
-      validatePlanStatus(status);
-      const plan = garden.updateSeedPlanStatus(planIdOrCrop, status, opts.date);
-      console.log(`Updated: ${cropName(plan!.crop, plan!.variety)} → ${humanize(status)}`);
-    } catch (e) { handleError(e, false); }
-  });
-
-planCmd
-  .command("remove <planIdOrCrop>")
-  .description("Remove a seed plan (by ID or crop name)")
-  .action((planIdOrCrop) => {
-    try {
-      const plan = garden.removeSeedPlan(planIdOrCrop);
-      console.log(`Removed: ${cropName(plan.crop, plan.variety)}`);
-    } catch (e) { handleError(e, false); }
-  });
-
-planCmd
-  .command("generate-tasks")
-  .description("Auto-generate tasks from seed plan dates")
-  .action(() => {
-    try {
-      const config = readConfig();
-      const created = garden.generateTasksFromPlans(config.defaultSeasonId);
-      if (created.length === 0) {
-        console.log("No new tasks to generate.");
-      } else {
-        console.log(`Generated ${created.length} task(s):`);
-        for (const t of created) {
-          console.log(`  ${priorityIcon(t.priority)} ${t.title}  ${t.due_at ? relativeDate(t.due_at) : ""}`);
-        }
-      }
     } catch (e) { handleError(e, false); }
   });
 

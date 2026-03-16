@@ -192,7 +192,7 @@ describe("CLI integration", () => {
     expect(data.spaces).toBeArray();
     expect(data.plantings).toBeArray();
     expect(data.openTasks).toBeArray();
-    expect(data.seedPlans).toBeArray();
+    expect(data.plantings).toBeArray();
   });
 
   test("week --json returns structured data", () => {
@@ -203,7 +203,7 @@ describe("CLI integration", () => {
     expect(data.thisWeek).toBeArray();
     expect(data.noDue).toBeArray();
     expect(data.suggestions).toBeArray();
-    expect(data.planActions).toBeArray();
+    expect(data.scheduleActions).toBeArray();
   });
 
   test("season create and list", () => {
@@ -228,89 +228,55 @@ describe("CLI integration", () => {
     expect(bed1Events[0].summary).toContain("bed-1");
   });
 
-  // --- Seed Plan CLI tests ---
+  // --- Planting Schedule CLI tests ---
 
-  test("plan add and list", () => {
+  test("plantings add with schedule fields", () => {
     cli("init --name G --year 2026");
     cli("spaces add bed-1 --type raised_bed");
 
-    const out = cli("plan add snapdragon --variety Madame-Butterfly --source Burpee --qty 15 --grid 12 --space bed-1 --start-date 2026-03-15 --harden-date 2026-04-20 --transplant-date 2026-05-01 --notes flower-boxes");
-    expect(out).toContain("Added to plan: snapdragon");
-    expect(out).toContain("Indoor");
+    const out = cli("plantings add snapdragon --variety Madame-Butterfly --from Burpee --qty 15 --grid 12 --space bed-1 --start-date 2026-03-15 --harden-date 2026-04-20 --transplant-date 2026-05-01 --notes flower-boxes");
+    expect(out).toContain("Added: snapdragon");
 
-    const plans = cliJson("plan list --json");
-    expect(plans).toHaveLength(1);
-    expect(plans[0].crop).toBe("snapdragon");
-    expect(plans[0].source).toBe("Burpee");
-    expect(plans[0].qty_to_start).toBe(15);
-    expect(plans[0].grid_squares).toBe(12);
-    expect(plans[0].target_start_date).toBe("2026-03-15");
+    const plantings = cliJson("plantings list --json");
+    expect(plantings).toHaveLength(1);
+    expect(plantings[0].crop).toBe("snapdragon");
+    expect(plantings[0].source).toBe("Burpee");
+    expect(plantings[0].quantity).toBe(15);
+    expect(plantings[0].grid_squares).toBe(12);
+    expect(plantings[0].target_start_date).toBe("2026-03-15");
   });
 
-  test("plan add direct sow", () => {
+  test("plantings schedule shows overdue and upcoming", () => {
     cli("init --name G --year 2026");
 
-    cli("plan add peas --start-type direct_sow --qty 30 --start-date 2026-03-20");
+    cli("plantings add pepper --start-date 2026-01-01");
+    cli("plantings add basil --start-date 2099-06-01");
 
-    const plans = cliJson("plan list --json");
-    expect(plans[0].start_type).toBe("direct_sow");
-  });
-
-  test("plan schedule shows overdue and upcoming", () => {
-    cli("init --name G --year 2026");
-
-    cli("plan add pepper --start-date 2026-01-01");
-    cli("plan add basil --start-date 2099-06-01");
-
-    const schedule = cliJson("plan schedule --json");
+    const schedule = cliJson("plantings schedule --json");
     expect(schedule.overdue.length).toBeGreaterThanOrEqual(1);
     expect(schedule.overdue[0].crop).toBe("pepper");
     expect(schedule.upcoming.length).toBeGreaterThanOrEqual(1);
     expect(schedule.upcoming[0].crop).toBe("basil");
   });
 
-  test("plan update changes status", () => {
+  test("plantings update-stage progresses through schedule", () => {
     cli("init --name G --year 2026");
-    cli("plan add tomato --start-date 2026-03-01");
+    cli("plantings add tomato --start-date 2026-03-01");
 
-    const plans = cliJson("plan list --json");
-    const planId = plans[0].id;
+    const out = cli("plantings update-stage tomato seeded_indoors --date 2026-03-01");
+    expect(out).toContain("Seeded Indoors");
 
-    const out = cli(`plan update ${planId} started --date 2026-03-01`);
-    expect(out).toContain("Started");
-
-    const updated = cliJson("plan list --json");
-    expect(updated[0].status).toBe("started");
-    expect(updated[0].started_at).toBe("2026-03-01");
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].stage).toBe("seeded_indoors");
+    expect(plantings[0].started_at).toBe("2026-03-01");
   });
 
-  test("plan update by crop name", () => {
+  test("plantings generate-tasks creates tasks from schedule dates", () => {
     cli("init --name G --year 2026");
-    cli("plan add basil --start-date 2026-03-15");
+    cli("plantings add tomato --start-date 2026-03-01");
+    cli("plantings add peas --source start --start-date 2026-03-20");
 
-    const out = cli("plan update basil started --date 2026-03-15");
-    expect(out).toContain("basil");
-    expect(out).toContain("Started");
-  });
-
-  test("plan remove", () => {
-    cli("init --name G --year 2026");
-    cli("plan add tomato --start-date 2026-03-01");
-
-    const out = cli("plan remove tomato");
-    expect(out).toContain("Removed");
-    expect(out).toContain("tomato");
-
-    const plans = cliJson("plan list --json");
-    expect(plans).toHaveLength(0);
-  });
-
-  test("plan generate-tasks creates tasks from plan dates", () => {
-    cli("init --name G --year 2026");
-    cli("plan add tomato --start-date 2026-03-01");
-    cli("plan add peas --start-type direct_sow --start-date 2026-03-20");
-
-    const out = cli("plan generate-tasks");
+    const out = cli("plantings generate-tasks");
     expect(out).toContain("Generated 2 task(s)");
     expect(out).toContain("Start indoors: tomato");
     expect(out).toContain("Direct sow: peas");
@@ -319,26 +285,26 @@ describe("CLI integration", () => {
     expect(tasks).toHaveLength(2);
   });
 
-  test("plan generate-tasks is idempotent", () => {
+  test("plantings generate-tasks is idempotent", () => {
     cli("init --name G --year 2026");
-    cli("plan add tomato --start-date 2026-03-01");
+    cli("plantings add tomato --start-date 2026-03-01");
 
-    cli("plan generate-tasks");
-    const out = cli("plan generate-tasks");
+    cli("plantings generate-tasks");
+    const out = cli("plantings generate-tasks");
     expect(out).toContain("No new tasks to generate");
 
     const tasks = cliJson("tasks list --json");
     expect(tasks).toHaveLength(1);
   });
 
-  test("week shows seed plan actions", () => {
+  test("week shows schedule actions", () => {
     cli("init --name G --year 2026");
-    cli("plan add pepper --start-date 2026-01-01");
+    cli("plantings add pepper --start-date 2026-01-01");
 
     const week = cliJson("week --json");
-    expect(week.planActions).toBeArray();
-    expect(week.planActions.length).toBeGreaterThanOrEqual(1);
-    expect(week.planActions[0].plan.crop).toBe("pepper");
+    expect(week.scheduleActions).toBeArray();
+    expect(week.scheduleActions.length).toBeGreaterThanOrEqual(1);
+    expect(week.scheduleActions[0].planting.crop).toBe("pepper");
   });
 
   test("spaces remove", () => {

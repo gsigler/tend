@@ -1,6 +1,6 @@
 ---
 name: tend
-description: Manage a personal garden using the tend CLI. Use when the user wants to track plantings, spaces, tasks, seed plans, or garden journal entries. Triggers include "add a planting", "check my garden", "what's due this week", "log a harvest", "plan my seeds", or any gardening/growing task.
+description: Manage a personal garden using the tend CLI. Use when the user wants to track plantings, spaces, tasks, or garden journal entries. Triggers include "add a planting", "check my garden", "what's due this week", "log a harvest", "plan my seeds", or any gardening/growing task.
 user-invocable: true
 allowed-tools: Bash, Read
 ---
@@ -14,8 +14,8 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 ## Available commands
 
 ### Dashboard
-- `tend summary` — Full garden overview (spaces, plantings, tasks, seed plans)
-- `tend week` — Weekly work plan (overdue, this week, suggestions, seed actions)
+- `tend summary` — Full garden overview (spaces, plantings, tasks)
+- `tend week` — Weekly work plan (overdue, this week, suggestions, schedule actions)
 - Add `--json` to any read command for structured output
 
 ### Spaces (physical growing locations)
@@ -26,12 +26,17 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - `tend spaces map <name>` — Show ASCII grid map of a space (requires width/length)
 - `tend spaces remove <name>` — Remove a space
 
-### Plantings (crops tracked through growth stages)
+### Plantings (crops tracked from plan to harvest)
 - `tend plantings add <crop>` — Add a planting
-  - Options: `--space`, `--variety`, `--source` (seed/start), `--stage`, `--qty`, `--qty-unit`, `--date`, `--notes`
+  - Options: `--space`, `--variety`, `--source` (seed/start), `--from` (vendor), `--stage`, `--qty`, `--qty-unit`, `--grid` (squares needed), `--date`, `--notes`
+  - Schedule: `--start-date`, `--harden-date`, `--transplant-date` (target dates)
+  - Grid: `--at A1,A2,B1,B2` (auto-place on grid, requires `--space`)
 - `tend plantings list` — List plantings (filter: `--space`, `--stage`, `--crop`)
 - `tend plantings update-stage <crop> <stage>` — Update stage (by crop name or ID)
   - Stages: planned → seeded_indoors → seedling → hardening_off → direct_sown → transplanted → producing → finished → failed
+  - Automatically sets `started_at`, `hardened_at`, or `transplanted_at` when reaching those stages
+- `tend plantings schedule` — View schedule (overdue/upcoming/done based on target dates)
+- `tend plantings generate-tasks` — Auto-generate tasks from schedule dates (idempotent)
 - `tend plantings place <crop> --space <name> --at <coords>` — Place on grid cells (e.g. `--at A1,A2,B1,B2`)
   - Coordinates: rows are letters (A, B, ...), columns are numbers (1, 2, ...)
   - One planting can occupy multiple cells; sets `space_id` automatically
@@ -51,15 +56,6 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
   - Options: `--space`, `--planting`, `--date`
 - `tend events list` — View timeline (filter: `--space`, `--planting`, `--limit`)
 
-### Seed Starting Plan
-- `tend plan add <crop>` — Add to seed plan
-  - Options: `--variety`, `--source`, `--start-type` (indoor/direct_sow), `--qty`, `--grid`, `--space`, `--start-date`, `--harden-date`, `--transplant-date`, `--notes`
-- `tend plan list` — List all plans
-- `tend plan schedule` — View schedule (overdue/upcoming/done)
-- `tend plan update <crop> <status>` — Update status (planned/started/hardening/transplanted/direct_sown/done/skipped)
-- `tend plan generate-tasks` — Auto-generate tasks from plan dates
-- `tend plan remove <crop>` — Remove a plan
-
 ### Seasons
 - `tend season list` — List seasons
 - `tend season create --name "<name>" --year <year>` — Create a season
@@ -76,3 +72,4 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - When the user describes gardening activities conversationally, translate them into the appropriate tend commands
 - If tend is not initialized, run `tend init` first
 - Show the user what changed after running commands
+- A planting IS the plan — use `--start-date`, `--harden-date`, `--transplant-date` when adding plantings to set up the schedule

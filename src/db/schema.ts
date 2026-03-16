@@ -42,12 +42,18 @@ CREATE TABLE IF NOT EXISTS plantings (
   crop TEXT NOT NULL,
   variety TEXT,
   source_type TEXT NOT NULL DEFAULT 'seed' CHECK(source_type IN ('seed','start')),
+  source TEXT,
   stage TEXT NOT NULL DEFAULT 'planned' CHECK(stage IN ('planned','seeded_indoors','seedling','hardening_off','direct_sown','transplanted','producing','finished','failed')),
   health TEXT NOT NULL DEFAULT 'healthy' CHECK(health IN ('healthy','watch','stressed','pest_issue','diseased','dead')),
   quantity REAL,
   quantity_unit TEXT,
+  grid_squares INTEGER,
   started_at TEXT,
+  hardened_at TEXT,
   transplanted_at TEXT,
+  target_start_date TEXT,
+  target_harden_date TEXT,
+  target_transplant_date TEXT,
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
@@ -63,28 +69,6 @@ CREATE TABLE IF NOT EXISTS events (
   summary TEXT NOT NULL,
   data_json TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE TABLE IF NOT EXISTS seed_plans (
-  id TEXT PRIMARY KEY,
-  season_id TEXT NOT NULL REFERENCES seasons(id),
-  crop TEXT NOT NULL,
-  variety TEXT,
-  source TEXT,
-  start_type TEXT NOT NULL DEFAULT 'indoor' CHECK(start_type IN ('indoor','direct_sow')),
-  qty_to_start INTEGER,
-  grid_squares INTEGER,
-  space_id TEXT REFERENCES spaces(id),
-  target_start_date TEXT,
-  target_harden_date TEXT,
-  target_transplant_date TEXT,
-  started_at TEXT,
-  hardened_at TEXT,
-  transplanted_at TEXT,
-  status TEXT NOT NULL DEFAULT 'planned' CHECK(status IN ('planned','started','hardening','transplanted','direct_sown','done','skipped')),
-  notes TEXT,
-  created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
 CREATE TABLE IF NOT EXISTS grid_placements (
@@ -114,6 +98,19 @@ CREATE TABLE IF NOT EXISTS tasks (
 );
 `;
 
+// Columns added in v0.1.2 — ALTER TABLE for existing databases
+const MIGRATION_COLUMNS = [
+  "ALTER TABLE plantings ADD COLUMN source TEXT",
+  "ALTER TABLE plantings ADD COLUMN grid_squares INTEGER",
+  "ALTER TABLE plantings ADD COLUMN hardened_at TEXT",
+  "ALTER TABLE plantings ADD COLUMN target_start_date TEXT",
+  "ALTER TABLE plantings ADD COLUMN target_harden_date TEXT",
+  "ALTER TABLE plantings ADD COLUMN target_transplant_date TEXT",
+];
+
 export function initializeSchema(db: Database): void {
   db.exec(SCHEMA_SQL);
+  for (const sql of MIGRATION_COLUMNS) {
+    try { db.exec(sql); } catch {}
+  }
 }

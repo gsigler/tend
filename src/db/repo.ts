@@ -139,12 +139,18 @@ export interface Planting {
   crop: string;
   variety: string | null;
   source_type: string;
+  source: string | null;
   stage: string;
   health: string;
   quantity: number | null;
   quantity_unit: string | null;
+  grid_squares: number | null;
   started_at: string | null;
+  hardened_at: string | null;
   transplanted_at: string | null;
+  target_start_date: string | null;
+  target_harden_date: string | null;
+  target_transplant_date: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -156,10 +162,15 @@ export interface CreatePlantingInput {
   crop: string;
   variety?: string;
   sourceType?: string;
+  source?: string;
   stage?: string;
   quantity?: number;
   quantityUnit?: string;
+  gridSquares?: number;
   startedAt?: string;
+  targetStartDate?: string;
+  targetHardenDate?: string;
+  targetTransplantDate?: string;
   notes?: string;
 }
 
@@ -169,16 +180,21 @@ export function createPlanting(db: Database, input: CreatePlantingInput): Planti
   const stage = input.stage ?? "planned";
   const transplantedAt = stage === "transplanted" ? (input.startedAt ?? now) : null;
   db.run(
-    `INSERT INTO plantings (id, season_id, space_id, crop, variety, source_type, stage, health, quantity, quantity_unit, started_at, transplanted_at, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.seasonId, input.spaceId ?? null, input.crop, input.variety ?? null, input.sourceType ?? "seed", stage, "healthy", input.quantity ?? null, input.quantityUnit ?? null, input.startedAt ?? null, transplantedAt, input.notes ?? null, now, now]
+    `INSERT INTO plantings (id, season_id, space_id, crop, variety, source_type, source, stage, health, quantity, quantity_unit, grid_squares, started_at, hardened_at, transplanted_at, target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.seasonId, input.spaceId ?? null, input.crop, input.variety ?? null, input.sourceType ?? "seed", input.source ?? null, stage, "healthy", input.quantity ?? null, input.quantityUnit ?? null, input.gridSquares ?? null, input.startedAt ?? null, null, transplantedAt, input.targetStartDate ?? null, input.targetHardenDate ?? null, input.targetTransplantDate ?? null, input.notes ?? null, now, now]
   );
   return {
     id, season_id: input.seasonId, space_id: input.spaceId ?? null,
     crop: input.crop, variety: input.variety ?? null,
-    source_type: input.sourceType ?? "seed", stage, health: "healthy",
+    source_type: input.sourceType ?? "seed", source: input.source ?? null,
+    stage, health: "healthy",
     quantity: input.quantity ?? null, quantity_unit: input.quantityUnit ?? null,
-    started_at: input.startedAt ?? null, transplanted_at: transplantedAt,
+    grid_squares: input.gridSquares ?? null,
+    started_at: input.startedAt ?? null, hardened_at: null, transplanted_at: transplantedAt,
+    target_start_date: input.targetStartDate ?? null,
+    target_harden_date: input.targetHardenDate ?? null,
+    target_transplant_date: input.targetTransplantDate ?? null,
     notes: input.notes ?? null, created_at: now, updated_at: now,
   };
 }
@@ -215,6 +231,14 @@ export function updatePlantingStage(db: Database, id: string, stage: string, dat
   const now = new Date().toISOString();
   const updates: string[] = ["stage = ?", "updated_at = ?"];
   const params: any[] = [stage, now];
+  if (stage === "seeded_indoors" || stage === "direct_sown") {
+    updates.push("started_at = COALESCE(started_at, ?)");
+    params.push(date ?? now);
+  }
+  if (stage === "hardening_off") {
+    updates.push("hardened_at = ?");
+    params.push(date ?? now);
+  }
   if (stage === "transplanted") {
     updates.push("transplanted_at = ?");
     params.push(date ?? now);
@@ -352,85 +376,6 @@ export function completeTask(db: Database, id: string): Task | null {
   return getTask(db, id);
 }
 
-// --- Seed Plans ---
-
-export interface SeedPlan {
-  id: string;
-  season_id: string;
-  crop: string;
-  variety: string | null;
-  source: string | null;
-  start_type: string;
-  qty_to_start: number | null;
-  grid_squares: number | null;
-  space_id: string | null;
-  target_start_date: string | null;
-  target_harden_date: string | null;
-  target_transplant_date: string | null;
-  started_at: string | null;
-  hardened_at: string | null;
-  transplanted_at: string | null;
-  status: string;
-  notes: string | null;
-  created_at: string;
-  updated_at: string;
-}
-
-export interface CreateSeedPlanInput {
-  seasonId: string;
-  crop: string;
-  variety?: string;
-  source?: string;
-  startType?: string;
-  qtyToStart?: number;
-  gridSquares?: number;
-  spaceId?: string;
-  targetStartDate?: string;
-  targetHardenDate?: string;
-  targetTransplantDate?: string;
-  notes?: string;
-}
-
-export function createSeedPlan(db: Database, input: CreateSeedPlanInput): SeedPlan {
-  const id = genId("plan");
-  const now = new Date().toISOString();
-  db.run(
-    `INSERT INTO seed_plans (id, season_id, crop, variety, source, start_type, qty_to_start, grid_squares, space_id,
-      target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.seasonId, input.crop, input.variety ?? null, input.source ?? null,
-     input.startType ?? "indoor", input.qtyToStart ?? null, input.gridSquares ?? null, input.spaceId ?? null,
-     input.targetStartDate ?? null, input.targetHardenDate ?? null, input.targetTransplantDate ?? null,
-     input.notes ?? null, now, now]
-  );
-  return {
-    id, season_id: input.seasonId, crop: input.crop, variety: input.variety ?? null,
-    source: input.source ?? null, start_type: input.startType ?? "indoor",
-    qty_to_start: input.qtyToStart ?? null, grid_squares: input.gridSquares ?? null,
-    space_id: input.spaceId ?? null,
-    target_start_date: input.targetStartDate ?? null,
-    target_harden_date: input.targetHardenDate ?? null,
-    target_transplant_date: input.targetTransplantDate ?? null,
-    started_at: null, hardened_at: null, transplanted_at: null,
-    status: "planned", notes: input.notes ?? null,
-    created_at: now, updated_at: now,
-  };
-}
-
-export function getSeedPlan(db: Database, id: string): SeedPlan | null {
-  return db.query("SELECT * FROM seed_plans WHERE id = ?").get(id) as SeedPlan | null;
-}
-
-export function deleteSeedPlan(db: Database, id: string): void {
-  db.run("DELETE FROM seed_plans WHERE id = ?", [id]);
-}
-
-export function findSeedPlan(db: Database, seasonId: string, idOrCrop: string): SeedPlan | null {
-  const byId = getSeedPlan(db, idOrCrop);
-  if (byId) return byId;
-  return db.query("SELECT * FROM seed_plans WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as SeedPlan | null;
-}
-
 // --- Grid Placements ---
 
 export interface GridPlacement {
@@ -479,46 +424,32 @@ export function deleteSpace(db: Database, id: string): void {
   db.run("DELETE FROM spaces WHERE id = ?", [id]);
 }
 
-export function listSeedPlans(db: Database, seasonId: string, filters?: { status?: string; startType?: string }): SeedPlan[] {
-  let sql = "SELECT * FROM seed_plans WHERE season_id = ?";
-  const params: any[] = [seasonId];
-  if (filters?.status) { sql += " AND status = ?"; params.push(filters.status); }
-  if (filters?.startType) { sql += " AND start_type = ?"; params.push(filters.startType); }
-  sql += " ORDER BY target_start_date ASC, crop ASC";
-  return db.query(sql).all(...params) as SeedPlan[];
-}
+// --- Planting Schedule Queries ---
 
-export function updateSeedPlanStatus(db: Database, id: string, status: string, dateField?: { field: string; value: string }): SeedPlan | null {
-  const now = new Date().toISOString();
-  let sql = "UPDATE seed_plans SET status = ?, updated_at = ?";
-  const params: any[] = [status, now];
-  if (dateField) {
-    sql += `, ${dateField.field} = ?`;
-    params.push(dateField.value);
-  }
-  sql += " WHERE id = ?";
-  params.push(id);
-  db.run(sql, params);
-  return getSeedPlan(db, id);
-}
-
-export function seedPlansNeedingAction(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+export function plantingsNeedingStart(db: Database, seasonId: string, beforeDate: string): Planting[] {
   return db.query(
-    `SELECT * FROM seed_plans WHERE season_id = ? AND status = 'planned' AND target_start_date IS NOT NULL AND target_start_date <= ?
+    `SELECT * FROM plantings WHERE season_id = ? AND stage = 'planned' AND target_start_date IS NOT NULL AND target_start_date <= ?
      ORDER BY target_start_date ASC`
-  ).all(seasonId, beforeDate) as SeedPlan[];
+  ).all(seasonId, beforeDate) as Planting[];
 }
 
-export function seedPlansNeedingHarden(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+export function plantingsNeedingHarden(db: Database, seasonId: string, beforeDate: string): Planting[] {
   return db.query(
-    `SELECT * FROM seed_plans WHERE season_id = ? AND status = 'started' AND target_harden_date IS NOT NULL AND target_harden_date <= ?
+    `SELECT * FROM plantings WHERE season_id = ? AND stage IN ('seeded_indoors','seedling') AND target_harden_date IS NOT NULL AND target_harden_date <= ?
      ORDER BY target_harden_date ASC`
-  ).all(seasonId, beforeDate) as SeedPlan[];
+  ).all(seasonId, beforeDate) as Planting[];
 }
 
-export function seedPlansNeedingTransplant(db: Database, seasonId: string, beforeDate: string): SeedPlan[] {
+export function plantingsNeedingTransplant(db: Database, seasonId: string, beforeDate: string): Planting[] {
   return db.query(
-    `SELECT * FROM seed_plans WHERE season_id = ? AND status IN ('started','hardening') AND target_transplant_date IS NOT NULL AND target_transplant_date <= ?
+    `SELECT * FROM plantings WHERE season_id = ? AND stage IN ('seeded_indoors','seedling','hardening_off') AND target_transplant_date IS NOT NULL AND target_transplant_date <= ?
      ORDER BY target_transplant_date ASC`
-  ).all(seasonId, beforeDate) as SeedPlan[];
+  ).all(seasonId, beforeDate) as Planting[];
+}
+
+export function listScheduledPlantings(db: Database, seasonId: string): Planting[] {
+  return db.query(
+    `SELECT * FROM plantings WHERE season_id = ? AND (target_start_date IS NOT NULL OR target_harden_date IS NOT NULL OR target_transplant_date IS NOT NULL)
+     ORDER BY target_start_date ASC, crop ASC`
+  ).all(seasonId) as Planting[];
 }

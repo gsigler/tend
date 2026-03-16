@@ -3,7 +3,7 @@ import { Database } from "bun:sqlite";
 import { initializeSchema } from "../src/db/schema";
 import * as repo from "../src/db/repo";
 
-describe("repo: seed plans", () => {
+describe("repo: planting schedule fields", () => {
   let db: Database;
   let seasonId: string;
   let spaceId: string;
@@ -19,115 +19,107 @@ describe("repo: seed plans", () => {
     spaceId = sp.id;
   });
 
-  test("create seed plan with all fields", () => {
-    const plan = repo.createSeedPlan(db, {
+  test("create planting with all schedule fields", () => {
+    const p = repo.createPlanting(db, {
       seasonId, crop: "snapdragon", variety: "Madame Butterfly",
-      source: "Burpee", startType: "indoor", qtyToStart: 15, gridSquares: 12,
+      source: "Burpee", sourceType: "seed", quantity: 15, gridSquares: 12,
       spaceId, targetStartDate: "2026-03-15", targetHardenDate: "2026-04-20",
       targetTransplantDate: "2026-05-01", notes: "For flower boxes (5 ft)",
     });
-    expect(plan.id).toStartWith("plan_");
-    expect(plan.crop).toBe("snapdragon");
-    expect(plan.variety).toBe("Madame Butterfly");
-    expect(plan.source).toBe("Burpee");
-    expect(plan.start_type).toBe("indoor");
-    expect(plan.qty_to_start).toBe(15);
-    expect(plan.grid_squares).toBe(12);
-    expect(plan.space_id).toBe(spaceId);
-    expect(plan.target_start_date).toBe("2026-03-15");
-    expect(plan.target_harden_date).toBe("2026-04-20");
-    expect(plan.target_transplant_date).toBe("2026-05-01");
-    expect(plan.status).toBe("planned");
-    expect(plan.notes).toBe("For flower boxes (5 ft)");
-    expect(plan.started_at).toBeNull();
+    expect(p.id).toStartWith("planting_");
+    expect(p.crop).toBe("snapdragon");
+    expect(p.variety).toBe("Madame Butterfly");
+    expect(p.source).toBe("Burpee");
+    expect(p.source_type).toBe("seed");
+    expect(p.quantity).toBe(15);
+    expect(p.grid_squares).toBe(12);
+    expect(p.space_id).toBe(spaceId);
+    expect(p.target_start_date).toBe("2026-03-15");
+    expect(p.target_harden_date).toBe("2026-04-20");
+    expect(p.target_transplant_date).toBe("2026-05-01");
+    expect(p.stage).toBe("planned");
+    expect(p.notes).toBe("For flower boxes (5 ft)");
+    expect(p.started_at).toBeNull();
   });
 
-  test("create minimal seed plan (direct sow)", () => {
-    const plan = repo.createSeedPlan(db, {
-      seasonId, crop: "peas", startType: "direct_sow", qtyToStart: 30,
+  test("create minimal planting with schedule date", () => {
+    const p = repo.createPlanting(db, {
+      seasonId, crop: "peas", sourceType: "seed", quantity: 30,
       targetStartDate: "2026-03-20",
     });
-    expect(plan.start_type).toBe("direct_sow");
-    expect(plan.variety).toBeNull();
-    expect(plan.source).toBeNull();
-    expect(plan.target_harden_date).toBeNull();
+    expect(p.source_type).toBe("seed");
+    expect(p.variety).toBeNull();
+    expect(p.source).toBeNull();
+    expect(p.target_harden_date).toBeNull();
+    expect(p.target_start_date).toBe("2026-03-20");
   });
 
-  test("list seed plans ordered by target start date", () => {
-    repo.createSeedPlan(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
-    repo.createSeedPlan(db, { seasonId, crop: "pepper", targetStartDate: "2026-02-15" });
-    repo.createSeedPlan(db, { seasonId, crop: "snapdragon", targetStartDate: "2026-03-15" });
+  test("list scheduled plantings ordered by target start date", () => {
+    repo.createPlanting(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
+    repo.createPlanting(db, { seasonId, crop: "pepper", targetStartDate: "2026-02-15" });
+    repo.createPlanting(db, { seasonId, crop: "snapdragon", targetStartDate: "2026-03-15" });
 
-    const plans = repo.listSeedPlans(db, seasonId);
-    expect(plans).toHaveLength(3);
-    expect(plans[0].crop).toBe("pepper");
-    expect(plans[1].crop).toBe("tomato");
-    expect(plans[2].crop).toBe("snapdragon");
+    const scheduled = repo.listScheduledPlantings(db, seasonId);
+    expect(scheduled).toHaveLength(3);
+    expect(scheduled[0].crop).toBe("pepper");
+    expect(scheduled[1].crop).toBe("tomato");
+    expect(scheduled[2].crop).toBe("snapdragon");
   });
 
-  test("filter plans by status", () => {
-    const p1 = repo.createSeedPlan(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
-    repo.createSeedPlan(db, { seasonId, crop: "pepper", targetStartDate: "2026-02-15" });
+  test("update stage to seeded_indoors sets started_at", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
 
-    repo.updateSeedPlanStatus(db, p1.id, "started", { field: "started_at", value: "2026-03-01" });
-
-    expect(repo.listSeedPlans(db, seasonId, { status: "planned" })).toHaveLength(1);
-    expect(repo.listSeedPlans(db, seasonId, { status: "started" })).toHaveLength(1);
-  });
-
-  test("filter plans by start type", () => {
-    repo.createSeedPlan(db, { seasonId, crop: "tomato", startType: "indoor" });
-    repo.createSeedPlan(db, { seasonId, crop: "peas", startType: "direct_sow" });
-
-    expect(repo.listSeedPlans(db, seasonId, { startType: "indoor" })).toHaveLength(1);
-    expect(repo.listSeedPlans(db, seasonId, { startType: "direct_sow" })).toHaveLength(1);
-  });
-
-  test("update status sets date field", () => {
-    const p = repo.createSeedPlan(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
-
-    const started = repo.updateSeedPlanStatus(db, p.id, "started", { field: "started_at", value: "2026-03-01" });
-    expect(started!.status).toBe("started");
+    const started = repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
+    expect(started!.stage).toBe("seeded_indoors");
     expect(started!.started_at).toBe("2026-03-01");
+  });
 
-    const hardened = repo.updateSeedPlanStatus(db, started!.id, "hardening", { field: "hardened_at", value: "2026-04-15" });
-    expect(hardened!.status).toBe("hardening");
+  test("update stage to hardening_off sets hardened_at", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato" });
+    repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
+
+    const hardened = repo.updatePlantingStage(db, p.id, "hardening_off", "2026-04-15");
+    expect(hardened!.stage).toBe("hardening_off");
     expect(hardened!.hardened_at).toBe("2026-04-15");
+  });
 
-    const transplanted = repo.updateSeedPlanStatus(db, hardened!.id, "transplanted", { field: "transplanted_at", value: "2026-05-01" });
-    expect(transplanted!.status).toBe("transplanted");
+  test("update stage to transplanted sets transplanted_at", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato" });
+
+    const transplanted = repo.updatePlantingStage(db, p.id, "transplanted", "2026-05-01");
+    expect(transplanted!.stage).toBe("transplanted");
     expect(transplanted!.transplanted_at).toBe("2026-05-01");
   });
 
-  test("seedPlansNeedingAction finds overdue planned items", () => {
-    repo.createSeedPlan(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
-    repo.createSeedPlan(db, { seasonId, crop: "pepper", targetStartDate: "2026-02-15" });
-    repo.createSeedPlan(db, { seasonId, crop: "basil", targetStartDate: "2026-04-01" });
+  test("plantingsNeedingStart finds overdue planned items", () => {
+    repo.createPlanting(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01" });
+    repo.createPlanting(db, { seasonId, crop: "pepper", targetStartDate: "2026-02-15" });
+    repo.createPlanting(db, { seasonId, crop: "basil", targetStartDate: "2026-04-01" });
 
-    const needing = repo.seedPlansNeedingAction(db, seasonId, "2026-03-15");
+    const needing = repo.plantingsNeedingStart(db, seasonId, "2026-03-15");
     expect(needing).toHaveLength(2);
     expect(needing[0].crop).toBe("pepper");
     expect(needing[1].crop).toBe("tomato");
   });
 
-  test("seedPlansNeedingHarden finds started items with due harden dates", () => {
-    const p = repo.createSeedPlan(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01", targetHardenDate: "2026-04-15" });
-    repo.updateSeedPlanStatus(db, p.id, "started", { field: "started_at", value: "2026-03-01" });
+  test("plantingsNeedingHarden finds seeded items with due harden dates", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato", targetStartDate: "2026-03-01", targetHardenDate: "2026-04-15" });
+    repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
 
-    expect(repo.seedPlansNeedingHarden(db, seasonId, "2026-04-20")).toHaveLength(1);
-    expect(repo.seedPlansNeedingHarden(db, seasonId, "2026-04-10")).toHaveLength(0);
+    expect(repo.plantingsNeedingHarden(db, seasonId, "2026-04-20")).toHaveLength(1);
+    expect(repo.plantingsNeedingHarden(db, seasonId, "2026-04-10")).toHaveLength(0);
   });
 
-  test("seedPlansNeedingTransplant finds items ready to transplant", () => {
-    const p = repo.createSeedPlan(db, { seasonId, crop: "tomato", targetTransplantDate: "2026-05-10" });
-    repo.updateSeedPlanStatus(db, p.id, "started", { field: "started_at", value: "2026-03-01" });
+  test("plantingsNeedingTransplant finds items ready to transplant", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato", targetTransplantDate: "2026-05-10" });
+    repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
 
-    expect(repo.seedPlansNeedingTransplant(db, seasonId, "2026-05-15")).toHaveLength(1);
-    expect(repo.seedPlansNeedingTransplant(db, seasonId, "2026-05-05")).toHaveLength(0);
+    expect(repo.plantingsNeedingTransplant(db, seasonId, "2026-05-15")).toHaveLength(1);
+    expect(repo.plantingsNeedingTransplant(db, seasonId, "2026-05-05")).toHaveLength(0);
   });
 });
 
-describe("service logic: seed plan task generation", () => {
+describe("service logic: task generation from planting schedules", () => {
   let db: Database;
   let seasonId: string;
 
@@ -141,19 +133,18 @@ describe("service logic: seed plan task generation", () => {
   });
 
   test("generates start tasks for planned items with target dates", () => {
-    repo.createSeedPlan(db, { seasonId, crop: "tomato", startType: "indoor", targetStartDate: "2026-03-01" });
-    repo.createSeedPlan(db, { seasonId, crop: "peas", startType: "direct_sow", targetStartDate: "2026-03-20" });
+    repo.createPlanting(db, { seasonId, crop: "tomato", sourceType: "seed", targetStartDate: "2026-03-01" });
+    repo.createPlanting(db, { seasonId, crop: "peas", sourceType: "start", targetStartDate: "2026-03-20" });
 
-    // Simulate generateTasksFromPlans logic
-    const plans = repo.listSeedPlans(db, seasonId);
+    const plantings = repo.listScheduledPlantings(db, seasonId);
     const tasks: repo.Task[] = [];
-    for (const p of plans) {
-      if (p.status === "planned" && p.target_start_date) {
-        const action = p.start_type === "indoor" ? "Start indoors" : "Direct sow";
+    for (const p of plantings) {
+      if (p.stage === "planned" && p.target_start_date) {
+        const action = p.source_type === "seed" ? "Start indoors" : "Direct sow";
         const task = repo.createTask(db, {
           seasonId, title: `${action}: ${p.crop}`, type: "seed_start",
           priority: "high", dueAt: p.target_start_date,
-          notes: `Auto-generated from seed plan ${p.id}`,
+          notes: `Auto-generated from planting ${p.id}`,
         });
         tasks.push(task);
       }
@@ -163,18 +154,18 @@ describe("service logic: seed plan task generation", () => {
     expect(tasks[1].title).toBe("Direct sow: peas");
   });
 
-  test("generates transplant tasks for started items", () => {
-    const p = repo.createSeedPlan(db, { seasonId, crop: "tomato", targetTransplantDate: "2026-05-10" });
-    repo.updateSeedPlanStatus(db, p.id, "started", { field: "started_at", value: "2026-03-01" });
+  test("generates transplant tasks for seeded items", () => {
+    const p = repo.createPlanting(db, { seasonId, crop: "tomato", targetTransplantDate: "2026-05-10" });
+    repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
 
-    const plans = repo.listSeedPlans(db, seasonId);
+    const plantings = repo.listScheduledPlantings(db, seasonId);
     const tasks: repo.Task[] = [];
-    for (const plan of plans) {
-      if ((plan.status === "started" || plan.status === "hardening") && plan.target_transplant_date) {
+    for (const pl of plantings) {
+      if ((pl.stage === "seeded_indoors" || pl.stage === "seedling" || pl.stage === "hardening_off") && pl.target_transplant_date) {
         const task = repo.createTask(db, {
-          seasonId, title: `Transplant: ${plan.crop}`, type: "transplant",
-          priority: "high", dueAt: plan.target_transplant_date,
-          notes: `Auto-generated from seed plan ${plan.id}`,
+          seasonId, title: `Transplant: ${pl.crop}`, type: "transplant",
+          priority: "high", dueAt: pl.target_transplant_date,
+          notes: `Auto-generated from planting ${pl.id}`,
         });
         tasks.push(task);
       }
@@ -184,29 +175,30 @@ describe("service logic: seed plan task generation", () => {
     expect(tasks[0].due_at).toBe("2026-05-10");
   });
 
-  test("full plan lifecycle", () => {
-    const p = repo.createSeedPlan(db, {
+  test("full planting lifecycle with schedule dates", () => {
+    const p = repo.createPlanting(db, {
       seasonId, crop: "tomato", variety: "Cherokee Purple",
-      source: "Johnny's", qtyToStart: 6, gridSquares: 4,
+      source: "Johnny's", quantity: 6, gridSquares: 4,
       targetStartDate: "2026-03-01", targetHardenDate: "2026-04-15",
       targetTransplantDate: "2026-05-10",
     });
 
     // Start
-    repo.updateSeedPlanStatus(db, p.id, "started", { field: "started_at", value: "2026-03-01" });
-    let plan = repo.getSeedPlan(db, p.id)!;
-    expect(plan.status).toBe("started");
-    expect(plan.started_at).toBe("2026-03-01");
+    repo.updatePlantingStage(db, p.id, "seeded_indoors", "2026-03-01");
+    let planting = repo.getPlanting(db, p.id)!;
+    expect(planting.stage).toBe("seeded_indoors");
+    expect(planting.started_at).toBe("2026-03-01");
 
     // Harden
-    repo.updateSeedPlanStatus(db, plan.id, "hardening", { field: "hardened_at", value: "2026-04-16" });
-    plan = repo.getSeedPlan(db, p.id)!;
-    expect(plan.status).toBe("hardening");
+    repo.updatePlantingStage(db, planting.id, "hardening_off", "2026-04-16");
+    planting = repo.getPlanting(db, p.id)!;
+    expect(planting.stage).toBe("hardening_off");
+    expect(planting.hardened_at).toBe("2026-04-16");
 
     // Transplant
-    repo.updateSeedPlanStatus(db, plan.id, "transplanted", { field: "transplanted_at", value: "2026-05-12" });
-    plan = repo.getSeedPlan(db, p.id)!;
-    expect(plan.status).toBe("transplanted");
-    expect(plan.transplanted_at).toBe("2026-05-12");
+    repo.updatePlantingStage(db, planting.id, "transplanted", "2026-05-12");
+    planting = repo.getPlanting(db, p.id)!;
+    expect(planting.stage).toBe("transplanted");
+    expect(planting.transplanted_at).toBe("2026-05-12");
   });
 });
