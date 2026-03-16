@@ -1,6 +1,7 @@
 #!/usr/bin/env bun
 import { Command } from "commander";
 import { initCommand } from "./commands/init";
+import { installSkills } from "./commands/install-skills";
 import { seasonCreate, seasonUse, seasonList } from "./commands/season";
 import { readConfig, getDb } from "./db/connection";
 import * as garden from "./services/garden";
@@ -50,6 +51,14 @@ program
     try {
       initCommand({ name: opts.name, year: parseInt(opts.year), lastFrost: opts.lastFrost, firstFrost: opts.firstFrost, force: opts.force });
     } catch (e) { handleError(e, false); }
+  });
+
+// --- install-skills ---
+program
+  .command("install-skills")
+  .description("Install Claude Code skill for tend")
+  .action(() => {
+    try { installSkills(); } catch (e) { handleError(e, false); }
   });
 
 // --- summary ---
