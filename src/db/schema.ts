@@ -108,9 +108,38 @@ const MIGRATION_COLUMNS = [
   "ALTER TABLE plantings ADD COLUMN target_transplant_date TEXT",
 ];
 
+// Migrate seed_plans rows into plantings (one-time, idempotent)
+const MIGRATE_SEED_PLANS = `
+INSERT INTO plantings (id, season_id, space_id, crop, variety, source_type, source, stage, health,
+  quantity, grid_squares, started_at, hardened_at, transplanted_at,
+  target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
+SELECT
+  REPLACE(id, 'plan_', 'planting_'),
+  season_id, space_id, crop, variety,
+  CASE start_type WHEN 'direct_sow' THEN 'start' ELSE 'seed' END,
+  source,
+  CASE status
+    WHEN 'planned' THEN 'planned'
+    WHEN 'started' THEN 'seeded_indoors'
+    WHEN 'hardening' THEN 'hardening_off'
+    WHEN 'transplanted' THEN 'transplanted'
+    WHEN 'direct_sown' THEN 'direct_sown'
+    WHEN 'done' THEN 'finished'
+    WHEN 'skipped' THEN 'failed'
+    ELSE 'planned'
+  END,
+  'healthy',
+  qty_to_start, grid_squares, started_at, hardened_at, transplanted_at,
+  target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at
+FROM seed_plans
+WHERE id NOT IN (SELECT REPLACE(id, 'planting_', 'plan_') FROM plantings)
+`;
+
 export function initializeSchema(db: Database): void {
   db.exec(SCHEMA_SQL);
   for (const sql of MIGRATION_COLUMNS) {
     try { db.exec(sql); } catch {}
   }
+  // Migrate any existing seed_plans into plantings
+  try { db.exec(MIGRATE_SEED_PLANS); } catch {}
 }
