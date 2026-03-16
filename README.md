@@ -44,7 +44,7 @@ tend init --name "My Garden" --year 2026
 
 **Season** — A growing year. You start with one; create more with `tend season create`. Switch between them with `tend season use`.
 
-**Space** — A physical growing location: raised bed, tray, container, shelf, etc. Spaces have optional dimensions and layout modes.
+**Space** — A physical growing location: raised bed, tray, container, shelf, etc. Spaces have optional dimensions and layout modes. Spaces with dimensions support grid placement for mapping where plantings are located.
 
 **Planting** — A crop in a space, tracked through growth stages from `planned` → `seeded_indoors` → `seedling` → `hardening_off` → `transplanted` → `producing` → `finished`.
 
@@ -76,6 +76,10 @@ tend spaces add pots --type container --notes "deck pots"
 tend spaces list
 tend spaces list --json
 tend spaces remove bed-1
+
+# Grid map (requires width/length on the space)
+tend spaces map bed-1
+tend spaces map bed-1 --json
 ```
 
 **Space types:** `raised_bed`, `tray`, `container`, `row_bed`, `shelf`, `hardening_area`
@@ -102,6 +106,13 @@ tend plantings update-stage tomato seedling --date 2026-04-01
 
 # Remove (by ID or crop name)
 tend plantings remove tomato
+
+# Place on grid (assigns cells within a space)
+tend plantings place tomato --space bed-1 --at A1,A2,B1,B2
+tend plantings place pepper --space bed-1 --at A3,B3
+
+# Remove from grid
+tend plantings unplace tomato
 ```
 
 **Stages:** `planned` → `seeded_indoors` → `seedling` → `hardening_off` → `direct_sown` → `transplanted` → `producing` → `finished` → `failed`
@@ -250,7 +261,7 @@ Everything is stored locally in `~/.tend/`:
 ```
 ~/.tend/
 ├── config.json    # active garden/season, units preference
-└── tend.db        # SQLite database (7 tables)
+└── tend.db        # SQLite database (8 tables)
 ```
 
 ### Database Schema
@@ -264,6 +275,7 @@ Everything is stored locally in `~/.tend/`:
 | `events` | Immutable activity journal |
 | `tasks` | To-do items with priority and due dates |
 | `seed_plans` | Seed starting schedule with target dates |
+| `grid_placements` | Coordinate-based placement of plantings within spaces |
 
 ## Development
 
@@ -290,13 +302,14 @@ src/
 │   ├── init.ts           # Init command
 │   ├── season.ts         # Season commands
 │   ├── format.ts         # Display formatting (humanize, dates, padding)
+│   ├── grid.ts           # Grid coordinate parsing, ASCII renderer, JSON builder
 │   ├── output.ts         # JSON/error output helpers
 │   └── validate.ts       # Input validation with friendly errors
 ├── db/
 │   ├── connection.ts     # SQLite connection + config management
 │   ├── ids.ts            # ID generation
 │   ├── repo.ts           # Data access layer (CRUD for all tables)
-│   └── schema.ts         # DDL for all 7 tables
+│   └── schema.ts         # DDL for all 8 tables
 └── services/
     ├── errors.ts         # TendError class
     └── garden.ts         # Business logic (summary, week plan, scheduling)

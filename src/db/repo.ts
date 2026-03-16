@@ -431,6 +431,50 @@ export function findSeedPlan(db: Database, seasonId: string, idOrCrop: string): 
   return db.query("SELECT * FROM seed_plans WHERE season_id = ? AND crop = ? ORDER BY created_at DESC LIMIT 1").get(seasonId, idOrCrop) as SeedPlan | null;
 }
 
+// --- Grid Placements ---
+
+export interface GridPlacement {
+  id: string;
+  space_id: string;
+  planting_id: string;
+  row: number;
+  col: number;
+  created_at: string;
+}
+
+export function placeOnGrid(db: Database, spaceId: string, plantingId: string, cells: { row: number; col: number }[]): GridPlacement[] {
+  const results: GridPlacement[] = [];
+  for (const cell of cells) {
+    const id = genId("grid");
+    db.run(
+      "INSERT INTO grid_placements (id, space_id, planting_id, row, col) VALUES (?, ?, ?, ?, ?)",
+      [id, spaceId, plantingId, cell.row, cell.col]
+    );
+    results.push({ id, space_id: spaceId, planting_id: plantingId, row: cell.row, col: cell.col, created_at: new Date().toISOString() });
+  }
+  return results;
+}
+
+export function removeGridPlacements(db: Database, plantingId: string): number {
+  const existing = db.query("SELECT COUNT(*) as c FROM grid_placements WHERE planting_id = ?").get(plantingId) as { c: number };
+  db.run("DELETE FROM grid_placements WHERE planting_id = ?", [plantingId]);
+  return existing.c;
+}
+
+export function getGridForSpace(db: Database, spaceId: string): (GridPlacement & { crop: string; variety: string | null; stage: string; health: string })[] {
+  return db.query(
+    `SELECT gp.*, p.crop, p.variety, p.stage, p.health
+     FROM grid_placements gp
+     JOIN plantings p ON gp.planting_id = p.id
+     WHERE gp.space_id = ?
+     ORDER BY gp.row, gp.col`
+  ).all(spaceId) as any[];
+}
+
+export function updatePlantingSpace(db: Database, id: string, spaceId: string): void {
+  db.run("UPDATE plantings SET space_id = ?, updated_at = ? WHERE id = ?", [spaceId, new Date().toISOString(), id]);
+}
+
 export function deleteSpace(db: Database, id: string): void {
   db.run("DELETE FROM spaces WHERE id = ?", [id]);
 }

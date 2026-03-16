@@ -26,6 +26,7 @@ export function getDb(): Database {
   _db = new Database(DB_PATH);
   _db.exec("PRAGMA journal_mode=WAL");
   _db.exec("PRAGMA foreign_keys=ON");
+  initializeSchema(_db);
   return _db;
 }
 

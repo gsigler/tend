@@ -87,6 +87,16 @@ CREATE TABLE IF NOT EXISTS seed_plans (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS grid_placements (
+  id TEXT PRIMARY KEY,
+  space_id TEXT NOT NULL REFERENCES spaces(id) ON DELETE CASCADE,
+  planting_id TEXT NOT NULL REFERENCES plantings(id) ON DELETE CASCADE,
+  row INTEGER NOT NULL,
+  col INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(space_id, row, col)
+);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id TEXT PRIMARY KEY,
   season_id TEXT NOT NULL REFERENCES seasons(id),

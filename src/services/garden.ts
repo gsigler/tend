@@ -131,6 +131,41 @@ export function logEvent(input: repo.CreateEventInput) {
   return repo.createEvent(db, input);
 }
 
+// --- Grid Placement ---
+
+export function placePlanting(seasonId: string, plantingIdOrCrop: string, spaceName: string, cells: { row: number; col: number }[]) {
+  const db = getDb();
+  const config = readConfig();
+  const planting = repo.findPlanting(db, seasonId, plantingIdOrCrop);
+  if (!planting) throw new TendError("NOT_FOUND", `Planting '${plantingIdOrCrop}' not found`);
+  const space = repo.getSpaceByName(db, seasonId, spaceName);
+  if (!space) throw new TendError("NOT_FOUND", `Space '${spaceName}' not found`);
+
+  // Set space_id on planting if not already set
+  if (!planting.space_id || planting.space_id !== space.id) {
+    repo.updatePlantingSpace(db, planting.id, space.id);
+  }
+
+  const placements = repo.placeOnGrid(db, space.id, planting.id, cells);
+  return { planting, space, placements };
+}
+
+export function unplacePlanting(seasonId: string, plantingIdOrCrop: string) {
+  const db = getDb();
+  const planting = repo.findPlanting(db, seasonId, plantingIdOrCrop);
+  if (!planting) throw new TendError("NOT_FOUND", `Planting '${plantingIdOrCrop}' not found`);
+  const count = repo.removeGridPlacements(db, planting.id);
+  return { planting, removedCount: count };
+}
+
+export function getSpaceMap(seasonId: string, spaceName: string) {
+  const db = getDb();
+  const space = repo.getSpaceByName(db, seasonId, spaceName);
+  if (!space) throw new TendError("NOT_FOUND", `Space '${spaceName}' not found`);
+  const placements = repo.getGridForSpace(db, space.id);
+  return { space, placements };
+}
+
 // --- Summary ---
 
 export function getSummary(seasonId: string) {

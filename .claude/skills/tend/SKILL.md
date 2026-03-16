@@ -23,6 +23,7 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
   - Types: `raised_bed`, `tray`, `container`, `row_bed`, `shelf`, `hardening_area`
   - Options: `--width`, `--length`, `--unit` (ft/in/m/cm), `--layout` (square_foot_grid/rows/cell_grid/none), `--notes`
 - `tend spaces list` — List all spaces
+- `tend spaces map <name>` — Show ASCII grid map of a space (requires width/length)
 - `tend spaces remove <name>` — Remove a space
 
 ### Plantings (crops tracked through growth stages)
@@ -31,6 +32,10 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - `tend plantings list` — List plantings (filter: `--space`, `--stage`, `--crop`)
 - `tend plantings update-stage <crop> <stage>` — Update stage (by crop name or ID)
   - Stages: planned → seeded_indoors → seedling → hardening_off → direct_sown → transplanted → producing → finished → failed
+- `tend plantings place <crop> --space <name> --at <coords>` — Place on grid cells (e.g. `--at A1,A2,B1,B2`)
+  - Coordinates: rows are letters (A, B, ...), columns are numbers (1, 2, ...)
+  - One planting can occupy multiple cells; sets `space_id` automatically
+- `tend plantings unplace <crop>` — Remove all grid placements for a planting
 - `tend plantings remove <crop>` — Remove a planting
 
 ### Tasks

@@ -13,6 +13,7 @@ import {
   validateTaskType, validatePriority, validateEventType, validateStartType, validatePlanStatus,
 } from "./commands/validate";
 import { humanize, relativeDate, shortDate, pad, cropName, header, priorityIcon } from "./commands/format";
+import { parseCoords, validateCoords, formatCoord, buildGridData, renderAsciiMap, buildMapJson } from "./commands/grid";
 
 const program = new Command();
 
@@ -282,6 +283,23 @@ spacesCmd
     } catch (e) { handleError(e, opts.json); }
   });
 
+spacesCmd
+  .command("map <name>")
+  .description("Show grid map of a space")
+  .option("--json", "Output as JSON", false)
+  .action((name, opts) => {
+    try {
+      const config = readConfig();
+      const { space, placements } = garden.getSpaceMap(config.defaultSeasonId, name);
+      const gridData = buildGridData(space, placements);
+      if (opts.json) {
+        output(buildMapJson(gridData), true);
+      } else {
+        console.log(renderAsciiMap(gridData));
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
 // --- plantings ---
 const plantingsCmd = program.command("plantings").description("Manage plantings");
 
@@ -365,6 +383,36 @@ plantingsCmd
     try {
       const planting = garden.removePlanting(plantingIdOrCrop);
       console.log(`Removed: ${cropName(planting.crop, planting.variety)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+plantingsCmd
+  .command("place <crop>")
+  .description("Place a planting on grid cells")
+  .requiredOption("--space <name>", "Space name")
+  .requiredOption("--at <coords>", "Coordinates (e.g. A1,A2,B1,B2)")
+  .action((crop, opts) => {
+    try {
+      const config = readConfig();
+      const cells = parseCoords(opts.at);
+      const db = getDb();
+      const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
+      if (!space) throw new TendError("NOT_FOUND", `Space '${opts.space}' not found`);
+      validateCoords(space, cells);
+      const result = garden.placePlanting(config.defaultSeasonId, crop, opts.space, cells);
+      const coordStr = cells.map(c => formatCoord(c.row, c.col)).join(", ");
+      console.log(`Placed: ${cropName(result.planting.crop, result.planting.variety)} at ${coordStr} in ${opts.space}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+plantingsCmd
+  .command("unplace <crop>")
+  .description("Remove all grid placements for a planting")
+  .action((crop) => {
+    try {
+      const config = readConfig();
+      const result = garden.unplacePlanting(config.defaultSeasonId, crop);
+      console.log(`Removed ${cropName(result.planting.crop, result.planting.variety)} from grid (${result.removedCount} cell(s))`);
     } catch (e) { handleError(e, false); }
   });
 
