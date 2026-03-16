@@ -65,8 +65,6 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - `tend catalog review <cropOrId>` — Log end-of-season review
   - Options: `--rating <1-5>`, `--yield <text>`, `--would-grow-again`, `--no-grow-again`, `--notes`
   - One review per variety per season (running again updates it)
-- `tend catalog import` — Import existing plantings into catalog (migration tool, `--dry-run` supported)
-
 ### Events & Journal
 - `tend log --note "<text>" --type <type>` — Log an entry
   - Types: observed, harvested, note, created, seeded, transplanted, task_completed, health_changed, stage_changed

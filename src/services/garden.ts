@@ -102,38 +102,6 @@ export function getCatalogShow(idOrName: string) {
   return { entry, reviews, plantings };
 }
 
-export function importCatalog(seasonId: string, dryRun: boolean = false) {
-  const db = getDb();
-  const plantings = repo.listPlantings(db, seasonId);
-  const toImport = plantings.filter(p => !p.catalog_id && p.variety);
-  const results: { planting: repo.Planting; entry: repo.CatalogEntry; created: boolean }[] = [];
-
-  for (const p of toImport) {
-    const existing = repo.findCatalogEntry(db, p.crop, p.variety!);
-    if (existing) {
-      if (!dryRun) {
-        repo.updatePlanting(db, p.id, { catalogId: existing.id });
-      }
-      results.push({ planting: p, entry: existing, created: false });
-    } else {
-      if (dryRun) {
-        results.push({ planting: p, entry: { id: "", crop: p.crop, variety: p.variety!, vendor: p.source, url: null, source_type: p.source_type, days_to_maturity: null, start_indoors_weeks: null, min_night_temp: null, spacing_inches: null, plants_per_square: 1, sun: null, growth_habit: null, grid_squares: p.grid_squares, tags: null, notes: null, created_at: "", updated_at: "" }, created: true });
-      } else {
-        const entry = repo.createCatalogEntry(db, {
-          crop: p.crop,
-          variety: p.variety!,
-          vendor: p.source ?? undefined,
-          sourceType: p.source_type,
-          gridSquares: p.grid_squares ?? undefined,
-        });
-        repo.updatePlanting(db, p.id, { catalogId: entry.id });
-        results.push({ planting: p, entry, created: true });
-      }
-    }
-  }
-  return results;
-}
-
 // --- Spaces ---
 
 export function addSpace(input: repo.CreateSpaceInput) {

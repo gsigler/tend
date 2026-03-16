@@ -944,29 +944,4 @@ catalogCmd
     } catch (e) { handleError(e, false); }
   });
 
-catalogCmd
-  .command("import")
-  .description("Import current season's plantings into the catalog")
-  .option("--dry-run", "Show what would be imported without doing it", false)
-  .action((opts) => {
-    try {
-      const config = readConfig();
-      const results = garden.importCatalog(config.defaultSeasonId, opts.dryRun);
-      if (results.length === 0) {
-        console.log("Nothing to import — all plantings with varieties are already cataloged.");
-        return;
-      }
-      const verb = opts.dryRun ? "Would import" : "Imported";
-      console.log(`${verb} ${results.length} planting(s):`);
-      const spaceMap = buildSpaceMap();
-      for (const r of results) {
-        const spaceName = r.planting.space_id ? spaceMap.get(r.planting.space_id) : null;
-        const where = spaceName ? `  from ${spaceName}` : "";
-        const action = r.created ? "+" : "→";
-        console.log(`  ${action} ${cropName(r.planting.crop, r.planting.variety)}${where}`);
-      }
-      if (opts.dryRun) console.log("\nRun without --dry-run to import.");
-    } catch (e) { handleError(e, false); }
-  });
-
 program.parse();

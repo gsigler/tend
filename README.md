@@ -221,9 +221,6 @@ tend catalog review "Pepper (Corno di Toro Mix)" --rating 4 \
   --yield "20+ peppers per plant" --would-grow-again \
   --notes "Great producer, started slow but exploded in July"
 
-# Import existing plantings into catalog (migration tool)
-tend catalog import --dry-run
-tend catalog import
 ```
 
 **Sun levels:** `full_sun`, `part_sun`, `shade`

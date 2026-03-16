@@ -495,21 +495,6 @@ describe("CLI integration", () => {
     expect(plantings[0].catalog_id).not.toBeNull();
   });
 
-  test("catalog import handles already-cataloged plantings", () => {
-    cli("init --name G --year 2026");
-    // plantings add with --variety auto-creates catalog, so import should find nothing new
-    cli("plantings add Tomato --variety Cherokee-Purple --from Burpee");
-    cli("plantings add peas --stage direct_sown"); // no variety, won't import
-
-    const out = cli("catalog import");
-    expect(out).toContain("Nothing to import");
-
-    // Catalog was auto-created by plantings add
-    const entries = cliJson("catalog list --json");
-    expect(entries).toHaveLength(1);
-    expect(entries[0].crop).toBe("Tomato");
-  });
-
   test("catalog list filters by tag", () => {
     cli("init --name G --year 2026");
     cli("catalog add Pepper --variety A --tags hot,red");
