@@ -1,6 +1,6 @@
 ---
 name: tend
-description: Manage a personal garden using the tend CLI. Use when the user wants to track plantings, spaces, tasks, or garden journal entries. Triggers include "add a planting", "check my garden", "what's due this week", "log a harvest", "plan my seeds", or any gardening/growing task.
+description: Manage a personal garden using the tend CLI. Use when the user wants to track plantings, spaces, tasks, catalog varieties, or garden journal entries. Triggers include "add a planting", "check my garden", "what's due this week", "log a harvest", "plan my seeds", "add to catalog", or any gardening/growing task.
 user-invocable: true
 allowed-tools: Bash, Read
 ---
@@ -14,7 +14,7 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 ## Available commands
 
 ### Dashboard
-- `tend summary` — Full garden overview (spaces, plantings, tasks)
+- `tend summary` — Full garden overview (spaces, plantings, tasks, catalog count)
 - `tend week` — Weekly work plan (overdue, this week, suggestions, schedule actions)
 - Add `--json` to any read command for structured output
 
@@ -29,6 +29,7 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 ### Plantings (crops tracked from plan to harvest)
 - `tend plantings add <crop>` — Add a planting
   - Options: `--space`, `--variety`, `--source` (seed/start), `--from` (vendor), `--stage`, `--qty`, `--qty-unit`, `--grid` (squares needed), `--date`, `--notes`
+  - Catalog: `--catalog <entry>` to link to existing catalog entry; providing `--variety` auto-creates a catalog entry
   - Schedule: `--start-date`, `--harden-date`, `--transplant-date` (target dates)
   - Grid: `--at A1,A2,B1,B2` (auto-place on grid, requires `--space`)
 - `tend plantings list` — List plantings (filter: `--space`, `--stage`, `--crop`)
@@ -54,6 +55,18 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - `tend tasks done "<title>"` — Mark done (partial match works)
 - `tend tasks remove "<title>"` — Remove a task
 
+### Catalog (variety reference library)
+- `tend catalog add <crop> --variety <variety>` — Add a variety to the catalog
+  - Options: `--vendor`, `--url`, `--source` (seed/start), `--days` (to maturity), `--start-weeks`, `--min-temp`, `--spacing`, `--plants-per-square`, `--sun` (full_sun/part_sun/shade), `--habit`, `--grid`, `--tags`, `--notes`
+- `tend catalog list` — List catalog entries (filter: `--crop`, `--tag`, `--vendor`)
+- `tend catalog show <cropOrId>` — Show full detail with season history and reviews
+- `tend catalog update <cropOrId>` — Update catalog entry fields (same options as add, plus `--notes-append`)
+- `tend catalog remove <cropOrId>` — Remove entry (use `--force` if plantings reference it)
+- `tend catalog review <cropOrId>` — Log end-of-season review
+  - Options: `--rating <1-5>`, `--yield <text>`, `--would-grow-again`, `--no-grow-again`, `--notes`
+  - One review per variety per season (running again updates it)
+- `tend catalog import` — Import existing plantings into catalog (migration tool, `--dry-run` supported)
+
 ### Events & Journal
 - `tend log --note "<text>" --type <type>` — Log an entry
   - Types: observed, harvested, note, created, seeded, transplanted, task_completed, health_changed, stage_changed
@@ -77,3 +90,5 @@ Run `tend` commands via the Bash tool. All data is stored in `~/.tend/`.
 - If tend is not initialized, run `tend init` first
 - Show the user what changed after running commands
 - A planting IS the plan — use `--start-date`, `--harden-date`, `--transplant-date` when adding plantings to set up the schedule
+- Use the catalog for variety info that persists across seasons (vendor, days to maturity, growing notes). Adding `--variety` to `plantings add` auto-creates a catalog entry
+- Use `tend catalog review` at end of season to record how varieties performed

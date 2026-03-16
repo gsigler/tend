@@ -72,6 +72,222 @@ export function listSeasons(db: Database, gardenId: string): Season[] {
   return db.query("SELECT * FROM seasons WHERE garden_id = ? ORDER BY year DESC").all(gardenId) as Season[];
 }
 
+// --- Catalog Entries ---
+
+export interface CatalogEntry {
+  id: string;
+  crop: string;
+  variety: string;
+  vendor: string | null;
+  url: string | null;
+  source_type: string | null;
+  days_to_maturity: number | null;
+  start_indoors_weeks: number | null;
+  min_night_temp: number | null;
+  spacing_inches: number | null;
+  plants_per_square: number | null;
+  sun: string | null;
+  growth_habit: string | null;
+  grid_squares: number | null;
+  tags: string | null;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateCatalogInput {
+  crop: string;
+  variety: string;
+  vendor?: string;
+  url?: string;
+  sourceType?: string;
+  daysToMaturity?: number;
+  startIndoorsWeeks?: number;
+  minNightTemp?: number;
+  spacingInches?: number;
+  plantsPerSquare?: number;
+  sun?: string;
+  growthHabit?: string;
+  gridSquares?: number;
+  tags?: string;
+  notes?: string;
+}
+
+export function createCatalogEntry(db: Database, input: CreateCatalogInput): CatalogEntry {
+  const id = genId("catalog");
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO catalog_entries (id, crop, variety, vendor, url, source_type, days_to_maturity, start_indoors_weeks, min_night_temp, spacing_inches, plants_per_square, sun, growth_habit, grid_squares, tags, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.crop, input.variety, input.vendor ?? null, input.url ?? null, input.sourceType ?? "seed", input.daysToMaturity ?? null, input.startIndoorsWeeks ?? null, input.minNightTemp ?? null, input.spacingInches ?? null, input.plantsPerSquare ?? 1, input.sun ?? null, input.growthHabit ?? null, input.gridSquares ?? null, input.tags ?? null, input.notes ?? null, now, now]
+  );
+  return {
+    id, crop: input.crop, variety: input.variety,
+    vendor: input.vendor ?? null, url: input.url ?? null,
+    source_type: input.sourceType ?? "seed",
+    days_to_maturity: input.daysToMaturity ?? null,
+    start_indoors_weeks: input.startIndoorsWeeks ?? null,
+    min_night_temp: input.minNightTemp ?? null,
+    spacing_inches: input.spacingInches ?? null,
+    plants_per_square: input.plantsPerSquare ?? 1,
+    sun: input.sun ?? null, growth_habit: input.growthHabit ?? null,
+    grid_squares: input.gridSquares ?? null,
+    tags: input.tags ?? null, notes: input.notes ?? null,
+    created_at: now, updated_at: now,
+  };
+}
+
+export function getCatalogEntry(db: Database, id: string): CatalogEntry | null {
+  return db.query("SELECT * FROM catalog_entries WHERE id = ?").get(id) as CatalogEntry | null;
+}
+
+export function findCatalogEntry(db: Database, crop: string, variety: string): CatalogEntry | null {
+  return db.query("SELECT * FROM catalog_entries WHERE crop = ? AND variety = ?").get(crop, variety) as CatalogEntry | null;
+}
+
+export function findCatalogEntriesByCrop(db: Database, crop: string): CatalogEntry[] {
+  return db.query("SELECT * FROM catalog_entries WHERE crop = ? ORDER BY variety ASC").all(crop) as CatalogEntry[];
+}
+
+export function listCatalogEntries(db: Database, filters?: { crop?: string; tag?: string; vendor?: string }): CatalogEntry[] {
+  let sql = "SELECT * FROM catalog_entries WHERE 1=1";
+  const params: any[] = [];
+  if (filters?.crop) { sql += " AND crop = ?"; params.push(filters.crop); }
+  if (filters?.tag) { sql += " AND (',' || tags || ',') LIKE ?"; params.push(`%,${filters.tag},%`); }
+  if (filters?.vendor) { sql += " AND vendor = ?"; params.push(filters.vendor); }
+  sql += " ORDER BY crop ASC, variety ASC";
+  return db.query(sql).all(...params) as CatalogEntry[];
+}
+
+export interface UpdateCatalogInput {
+  crop?: string;
+  variety?: string;
+  vendor?: string | null;
+  url?: string | null;
+  sourceType?: string;
+  daysToMaturity?: number | null;
+  startIndoorsWeeks?: number | null;
+  minNightTemp?: number | null;
+  spacingInches?: number | null;
+  plantsPerSquare?: number | null;
+  sun?: string | null;
+  growthHabit?: string | null;
+  gridSquares?: number | null;
+  tags?: string | null;
+  notes?: string | null;
+  notesAppend?: string;
+}
+
+export function updateCatalogEntry(db: Database, id: string, input: UpdateCatalogInput): CatalogEntry | null {
+  const now = new Date().toISOString();
+  const sets: string[] = ["updated_at = ?"];
+  const params: any[] = [now];
+
+  if (input.crop !== undefined) { sets.push("crop = ?"); params.push(input.crop); }
+  if (input.variety !== undefined) { sets.push("variety = ?"); params.push(input.variety); }
+  if (input.vendor !== undefined) { sets.push("vendor = ?"); params.push(input.vendor); }
+  if (input.url !== undefined) { sets.push("url = ?"); params.push(input.url); }
+  if (input.sourceType !== undefined) { sets.push("source_type = ?"); params.push(input.sourceType); }
+  if (input.daysToMaturity !== undefined) { sets.push("days_to_maturity = ?"); params.push(input.daysToMaturity); }
+  if (input.startIndoorsWeeks !== undefined) { sets.push("start_indoors_weeks = ?"); params.push(input.startIndoorsWeeks); }
+  if (input.minNightTemp !== undefined) { sets.push("min_night_temp = ?"); params.push(input.minNightTemp); }
+  if (input.spacingInches !== undefined) { sets.push("spacing_inches = ?"); params.push(input.spacingInches); }
+  if (input.plantsPerSquare !== undefined) { sets.push("plants_per_square = ?"); params.push(input.plantsPerSquare); }
+  if (input.sun !== undefined) { sets.push("sun = ?"); params.push(input.sun); }
+  if (input.growthHabit !== undefined) { sets.push("growth_habit = ?"); params.push(input.growthHabit); }
+  if (input.gridSquares !== undefined) { sets.push("grid_squares = ?"); params.push(input.gridSquares); }
+  if (input.tags !== undefined) { sets.push("tags = ?"); params.push(input.tags); }
+  if (input.notes !== undefined) { sets.push("notes = ?"); params.push(input.notes); }
+  if (input.notesAppend !== undefined) {
+    sets.push("notes = CASE WHEN notes IS NULL OR notes = '' THEN ? ELSE notes || char(10) || ? END");
+    params.push(input.notesAppend, input.notesAppend);
+  }
+
+  params.push(id);
+  db.run(`UPDATE catalog_entries SET ${sets.join(", ")} WHERE id = ?`, params);
+  return getCatalogEntry(db, id);
+}
+
+export function deleteCatalogEntry(db: Database, id: string): void {
+  db.run("DELETE FROM catalog_entries WHERE id = ?", [id]);
+}
+
+export function countPlantingsByCatalogId(db: Database, catalogId: string): number {
+  const row = db.query("SELECT COUNT(*) as c FROM plantings WHERE catalog_id = ?").get(catalogId) as { c: number };
+  return row.c;
+}
+
+// --- Catalog Reviews ---
+
+export interface CatalogReview {
+  id: string;
+  catalog_id: string;
+  season_id: string;
+  planting_id: string | null;
+  rating: number | null;
+  yield_notes: string | null;
+  would_grow_again: number | null;
+  review: string | null;
+  created_at: string;
+}
+
+export interface CreateReviewInput {
+  catalogId: string;
+  seasonId: string;
+  plantingId?: string;
+  rating?: number;
+  yieldNotes?: string;
+  wouldGrowAgain?: boolean;
+  review?: string;
+}
+
+export function upsertCatalogReview(db: Database, input: CreateReviewInput): CatalogReview {
+  const existing = db.query("SELECT * FROM catalog_reviews WHERE catalog_id = ? AND season_id = ?").get(input.catalogId, input.seasonId) as CatalogReview | null;
+  if (existing) {
+    const sets: string[] = [];
+    const params: any[] = [];
+    if (input.rating !== undefined) { sets.push("rating = ?"); params.push(input.rating); }
+    if (input.yieldNotes !== undefined) { sets.push("yield_notes = ?"); params.push(input.yieldNotes); }
+    if (input.wouldGrowAgain !== undefined) { sets.push("would_grow_again = ?"); params.push(input.wouldGrowAgain ? 1 : 0); }
+    if (input.review !== undefined) { sets.push("review = ?"); params.push(input.review); }
+    if (input.plantingId !== undefined) { sets.push("planting_id = ?"); params.push(input.plantingId); }
+    if (sets.length > 0) {
+      params.push(existing.id);
+      db.run(`UPDATE catalog_reviews SET ${sets.join(", ")} WHERE id = ?`, params);
+    }
+    return db.query("SELECT * FROM catalog_reviews WHERE id = ?").get(existing.id) as CatalogReview;
+  }
+  const id = genId("catrev");
+  const now = new Date().toISOString();
+  db.run(
+    `INSERT INTO catalog_reviews (id, catalog_id, season_id, planting_id, rating, yield_notes, would_grow_again, review, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.catalogId, input.seasonId, input.plantingId ?? null, input.rating ?? null, input.yieldNotes ?? null, input.wouldGrowAgain !== undefined ? (input.wouldGrowAgain ? 1 : 0) : null, input.review ?? null, now]
+  );
+  return {
+    id, catalog_id: input.catalogId, season_id: input.seasonId,
+    planting_id: input.plantingId ?? null, rating: input.rating ?? null,
+    yield_notes: input.yieldNotes ?? null,
+    would_grow_again: input.wouldGrowAgain !== undefined ? (input.wouldGrowAgain ? 1 : 0) : null,
+    review: input.review ?? null, created_at: now,
+  };
+}
+
+export function listReviewsForCatalog(db: Database, catalogId: string): (CatalogReview & { year: number; season_name: string })[] {
+  return db.query(
+    `SELECT cr.*, s.year, s.name as season_name
+     FROM catalog_reviews cr
+     JOIN seasons s ON cr.season_id = s.id
+     WHERE cr.catalog_id = ?
+     ORDER BY s.year DESC`
+  ).all(catalogId) as any[];
+}
+
+export function countReviewsForSeason(db: Database, seasonId: string): number {
+  const row = db.query("SELECT COUNT(*) as c FROM catalog_reviews WHERE season_id = ?").get(seasonId) as { c: number };
+  return row.c;
+}
+
 // --- Spaces ---
 
 export interface Space {
@@ -135,6 +351,7 @@ export function getSpace(db: Database, id: string): Space | null {
 export interface Planting {
   id: string;
   season_id: string;
+  catalog_id: string | null;
   space_id: string | null;
   crop: string;
   variety: string | null;
@@ -158,6 +375,7 @@ export interface Planting {
 
 export interface CreatePlantingInput {
   seasonId: string;
+  catalogId?: string;
   spaceId?: string;
   crop: string;
   variety?: string;
@@ -180,12 +398,12 @@ export function createPlanting(db: Database, input: CreatePlantingInput): Planti
   const stage = input.stage ?? "planned";
   const transplantedAt = stage === "transplanted" ? (input.startedAt ?? now) : null;
   db.run(
-    `INSERT INTO plantings (id, season_id, space_id, crop, variety, source_type, source, stage, health, quantity, quantity_unit, grid_squares, started_at, hardened_at, transplanted_at, target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    [id, input.seasonId, input.spaceId ?? null, input.crop, input.variety ?? null, input.sourceType ?? "seed", input.source ?? null, stage, "healthy", input.quantity ?? null, input.quantityUnit ?? null, input.gridSquares ?? null, input.startedAt ?? null, null, transplantedAt, input.targetStartDate ?? null, input.targetHardenDate ?? null, input.targetTransplantDate ?? null, input.notes ?? null, now, now]
+    `INSERT INTO plantings (id, season_id, catalog_id, space_id, crop, variety, source_type, source, stage, health, quantity, quantity_unit, grid_squares, started_at, hardened_at, transplanted_at, target_start_date, target_harden_date, target_transplant_date, notes, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [id, input.seasonId, input.catalogId ?? null, input.spaceId ?? null, input.crop, input.variety ?? null, input.sourceType ?? "seed", input.source ?? null, stage, "healthy", input.quantity ?? null, input.quantityUnit ?? null, input.gridSquares ?? null, input.startedAt ?? null, null, transplantedAt, input.targetStartDate ?? null, input.targetHardenDate ?? null, input.targetTransplantDate ?? null, input.notes ?? null, now, now]
   );
   return {
-    id, season_id: input.seasonId, space_id: input.spaceId ?? null,
+    id, season_id: input.seasonId, catalog_id: input.catalogId ?? null, space_id: input.spaceId ?? null,
     crop: input.crop, variety: input.variety ?? null,
     source_type: input.sourceType ?? "seed", source: input.source ?? null,
     stage, health: "healthy",
@@ -226,6 +444,7 @@ export function findPlantingsByCrop(db: Database, seasonId: string, crop: string
 }
 
 export interface UpdatePlantingInput {
+  catalogId?: string | null;
   crop?: string;
   variety?: string | null;
   sourceType?: string;
@@ -247,6 +466,7 @@ export function updatePlanting(db: Database, id: string, input: UpdatePlantingIn
   const sets: string[] = ["updated_at = ?"];
   const params: any[] = [now];
 
+  if (input.catalogId !== undefined) { sets.push("catalog_id = ?"); params.push(input.catalogId); }
   if (input.crop !== undefined) { sets.push("crop = ?"); params.push(input.crop); }
   if (input.variety !== undefined) { sets.push("variety = ?"); params.push(input.variety); }
   if (input.sourceType !== undefined) { sets.push("source_type = ?"); params.push(input.sourceType); }

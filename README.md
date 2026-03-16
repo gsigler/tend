@@ -52,6 +52,8 @@ tend init --name "My Garden" --year 2026
 
 **Event** — An immutable journal entry. Every mutation (planting, stage change, task completion) automatically creates an event, and you can log observations manually.
 
+**Catalog** — A season-independent library of crop varieties. Stores persistent info like vendor, days to maturity, spacing, and growing notes. Plantings link to catalog entries so variety knowledge carries across seasons. Supports end-of-season reviews.
+
 ## Commands
 
 ### Initialize
@@ -185,6 +187,47 @@ tend events list --json
 
 **Event types:** `created`, `seeded`, `transplanted`, `observed`, `harvested`, `task_completed`, `health_changed`, `stage_changed`, `note`
 
+### Catalog (Variety Library)
+
+A season-independent library of crop varieties. Adding a planting with `--variety` auto-creates a catalog entry.
+
+```bash
+# Add to catalog with growing details
+tend catalog add Pepper --variety "Corno di Toro Mix" \
+  --vendor "Renee's Garden" --days 80 --start-weeks 8 --min-temp 50 \
+  --sun full_sun --habit upright --grid 1 --tags "italian,roasting" \
+  --notes "Harvest when glossy, fully red or yellow"
+
+# List catalog (with filters)
+tend catalog list
+tend catalog list --crop Pepper
+tend catalog list --tag container-friendly
+tend catalog list --vendor Burpee --json
+
+# Show full detail for a variety
+tend catalog show "Pepper (Corno di Toro Mix)"
+tend catalog show Tomato                        # works if only one tomato variety
+
+# Update catalog entry
+tend catalog update Tomato --days 52 --vendor Local
+tend catalog update "Pepper (Corno di Toro Mix)" --notes-append "Needs staking"
+
+# Remove (blocked if plantings reference it, use --force to override)
+tend catalog remove Basil
+tend catalog remove Tomato --force
+
+# End-of-season review
+tend catalog review "Pepper (Corno di Toro Mix)" --rating 4 \
+  --yield "20+ peppers per plant" --would-grow-again \
+  --notes "Great producer, started slow but exploded in July"
+
+# Import existing plantings into catalog (migration tool)
+tend catalog import --dry-run
+tend catalog import
+```
+
+**Sun levels:** `full_sun`, `part_sun`, `shade`
+
 ### Seasons
 
 ```bash
@@ -243,7 +286,7 @@ Everything is stored locally in `~/.tend/`:
 ```
 ~/.tend/
 ├── config.json    # active garden/season, units preference
-└── tend.db        # SQLite database (7 tables)
+└── tend.db        # SQLite database (9 tables)
 ```
 
 ### Database Schema
@@ -253,7 +296,9 @@ Everything is stored locally in `~/.tend/`:
 | `gardens` | Garden identity (name) |
 | `seasons` | Growing years with frost dates |
 | `spaces` | Physical growing locations |
-| `plantings` | Crops tracked through growth stages, with schedule dates and grid placement |
+| `catalog_entries` | Season-independent variety reference library |
+| `catalog_reviews` | End-of-season variety reviews |
+| `plantings` | Crops tracked through growth stages, linked to catalog |
 | `events` | Immutable activity journal |
 | `tasks` | To-do items with priority and due dates |
 | `grid_placements` | Coordinate-based placement of plantings within spaces |
@@ -264,7 +309,7 @@ Everything is stored locally in `~/.tend/`:
 # Run directly
 bun run src/cli.ts <command>
 
-# Run tests (59 tests across 4 files)
+# Run tests
 bun test
 
 # Type check
@@ -290,7 +335,7 @@ src/
 │   ├── connection.ts     # SQLite connection + config management
 │   ├── ids.ts            # ID generation
 │   ├── repo.ts           # Data access layer (CRUD for all tables)
-│   └── schema.ts         # DDL for all 7 tables
+│   └── schema.ts         # DDL for all 9 tables
 └── services/
     ├── errors.ts         # TendError class
     └── garden.ts         # Business logic (summary, week plan, scheduling)
@@ -299,7 +344,8 @@ test/
 ├── cli.test.ts           # 26 end-to-end CLI integration tests
 ├── repo.test.ts          # 17 repository unit tests
 ├── services.test.ts      # 4 service logic tests
-├── plan.test.ts          # 11 planting schedule tests
+├── plan.test.ts          # Planting schedule tests
+├── catalog.test.ts       # Catalog and review tests
 └── helpers.ts            # Test utilities
 ```
 

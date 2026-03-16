@@ -10,6 +10,130 @@ function resolveSpaceId(db: Database, seasonId: string, spaceName?: string): str
   return space.id;
 }
 
+// --- Catalog ---
+
+export function findCatalogStrict(idOrName: string) {
+  const db = getDb();
+  // Try by ID
+  const byId = repo.getCatalogEntry(db, idOrName);
+  if (byId) return byId;
+  // Try "crop (variety)" format
+  const parenMatch = idOrName.match(/^(.+?)\s*\((.+)\)$/);
+  if (parenMatch) {
+    const [, crop, variety] = parenMatch;
+    const entry = repo.findCatalogEntry(db, crop.trim(), variety.trim());
+    if (entry) return entry;
+  }
+  // Try by crop name — check for ambiguity
+  const matches = repo.findCatalogEntriesByCrop(db, idOrName);
+  if (matches.length === 0) throw new TendError("NOT_FOUND", `Catalog entry '${idOrName}' not found`);
+  if (matches.length === 1) return matches[0];
+  const lines = matches.map(e => `  ${e.id}  ${e.crop} (${e.variety})`);
+  throw new TendError("CONFLICT", `Multiple catalog entries match '${idOrName}'. Use a more specific name or ID:\n${lines.join("\n")}`);
+}
+
+export function addCatalogEntry(input: repo.CreateCatalogInput) {
+  const db = getDb();
+  const existing = repo.findCatalogEntry(db, input.crop, input.variety);
+  if (existing) throw new TendError("CONFLICT", `${input.crop} (${input.variety}) already exists in catalog (${existing.id}). Use 'tend catalog update' to modify it.`);
+  return repo.createCatalogEntry(db, input);
+}
+
+export function listCatalog(filters?: { crop?: string; tag?: string; vendor?: string }) {
+  const db = getDb();
+  return repo.listCatalogEntries(db, filters);
+}
+
+export function updateCatalogEntry(idOrName: string, input: repo.UpdateCatalogInput) {
+  const entry = findCatalogStrict(idOrName);
+  const db = getDb();
+  return repo.updateCatalogEntry(db, entry.id, input);
+}
+
+export function removeCatalogEntry(idOrName: string, force: boolean = false) {
+  const entry = findCatalogStrict(idOrName);
+  const db = getDb();
+  const count = repo.countPlantingsByCatalogId(db, entry.id);
+  if (count > 0 && !force) {
+    throw new TendError("CONFLICT", `Cannot remove ${entry.crop} (${entry.variety}) — ${count} planting(s) reference it. Remove the planting(s) first, or use --force to remove both.`);
+  }
+  if (count > 0 && force) {
+    // Delete linked plantings
+    const plantings = db.query("SELECT id FROM plantings WHERE catalog_id = ?").all(entry.id) as { id: string }[];
+    for (const p of plantings) repo.deletePlanting(db, p.id);
+  }
+  repo.deleteCatalogEntry(db, entry.id);
+  return entry;
+}
+
+export function reviewCatalogEntry(idOrName: string, input: Omit<repo.CreateReviewInput, "catalogId" | "seasonId">) {
+  const entry = findCatalogStrict(idOrName);
+  const db = getDb();
+  const config = readConfig();
+  // Auto-link to planting if one exists for this catalog entry in the current season
+  let plantingId = input.plantingId;
+  if (!plantingId) {
+    const planting = db.query("SELECT id FROM plantings WHERE catalog_id = ? AND season_id = ? LIMIT 1").get(entry.id, config.defaultSeasonId) as { id: string } | null;
+    if (planting) plantingId = planting.id;
+  }
+  const review = repo.upsertCatalogReview(db, {
+    catalogId: entry.id,
+    seasonId: config.defaultSeasonId,
+    plantingId,
+    ...input,
+  });
+  return { entry, review };
+}
+
+export function getCatalogShow(idOrName: string) {
+  const entry = findCatalogStrict(idOrName);
+  const db = getDb();
+  const reviews = repo.listReviewsForCatalog(db, entry.id);
+  // Get season plantings for this catalog entry
+  const plantings = db.query(
+    `SELECT p.*, s.year, s.name as season_name, sp.name as space_name,
+       (SELECT COUNT(*) FROM grid_placements gp WHERE gp.planting_id = p.id) as grid_count
+     FROM plantings p
+     JOIN seasons s ON p.season_id = s.id
+     LEFT JOIN spaces sp ON p.space_id = sp.id
+     WHERE p.catalog_id = ?
+     ORDER BY s.year DESC`
+  ).all(entry.id) as any[];
+  return { entry, reviews, plantings };
+}
+
+export function importCatalog(seasonId: string, dryRun: boolean = false) {
+  const db = getDb();
+  const plantings = repo.listPlantings(db, seasonId);
+  const toImport = plantings.filter(p => !p.catalog_id && p.variety);
+  const results: { planting: repo.Planting; entry: repo.CatalogEntry; created: boolean }[] = [];
+
+  for (const p of toImport) {
+    const existing = repo.findCatalogEntry(db, p.crop, p.variety!);
+    if (existing) {
+      if (!dryRun) {
+        repo.updatePlanting(db, p.id, { catalogId: existing.id });
+      }
+      results.push({ planting: p, entry: existing, created: false });
+    } else {
+      if (dryRun) {
+        results.push({ planting: p, entry: { id: "", crop: p.crop, variety: p.variety!, vendor: p.source, url: null, source_type: p.source_type, days_to_maturity: null, start_indoors_weeks: null, min_night_temp: null, spacing_inches: null, plants_per_square: 1, sun: null, growth_habit: null, grid_squares: p.grid_squares, tags: null, notes: null, created_at: "", updated_at: "" }, created: true });
+      } else {
+        const entry = repo.createCatalogEntry(db, {
+          crop: p.crop,
+          variety: p.variety!,
+          vendor: p.source ?? undefined,
+          sourceType: p.source_type,
+          gridSquares: p.grid_squares ?? undefined,
+        });
+        repo.updatePlanting(db, p.id, { catalogId: entry.id });
+        results.push({ planting: p, entry, created: true });
+      }
+    }
+  }
+  return results;
+}
+
 // --- Spaces ---
 
 export function addSpace(input: repo.CreateSpaceInput) {
@@ -230,7 +354,9 @@ export function getSummary(seasonId: string) {
   const spaces = repo.listSpaces(db, seasonId);
   const plantings = repo.listPlantings(db, seasonId);
   const openTasks = repo.listTasks(db, seasonId, { status: "open" });
-  return { garden, season, spaces, plantings, openTasks };
+  const catalogCount = repo.listCatalogEntries(db).length;
+  const reviewCount = repo.countReviewsForSeason(db, seasonId);
+  return { garden, season, spaces, plantings, openTasks, catalogCount, reviewCount };
 }
 
 // --- Week ---

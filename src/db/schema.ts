@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS spaces (
 CREATE TABLE IF NOT EXISTS plantings (
   id TEXT PRIMARY KEY,
   season_id TEXT NOT NULL REFERENCES seasons(id),
+  catalog_id TEXT REFERENCES catalog_entries(id),
   space_id TEXT REFERENCES spaces(id),
   crop TEXT NOT NULL,
   variety TEXT,
@@ -57,6 +58,41 @@ CREATE TABLE IF NOT EXISTS plantings (
   notes TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS catalog_entries (
+  id TEXT PRIMARY KEY,
+  crop TEXT NOT NULL,
+  variety TEXT NOT NULL,
+  vendor TEXT,
+  url TEXT,
+  source_type TEXT DEFAULT 'seed' CHECK(source_type IN ('seed','start')),
+  days_to_maturity INTEGER,
+  start_indoors_weeks INTEGER,
+  min_night_temp INTEGER,
+  spacing_inches INTEGER,
+  plants_per_square INTEGER DEFAULT 1,
+  sun TEXT CHECK(sun IS NULL OR sun IN ('full_sun','part_sun','shade')),
+  growth_habit TEXT,
+  grid_squares INTEGER,
+  tags TEXT,
+  notes TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(crop, variety)
+);
+
+CREATE TABLE IF NOT EXISTS catalog_reviews (
+  id TEXT PRIMARY KEY,
+  catalog_id TEXT NOT NULL REFERENCES catalog_entries(id) ON DELETE CASCADE,
+  season_id TEXT NOT NULL REFERENCES seasons(id),
+  planting_id TEXT REFERENCES plantings(id),
+  rating INTEGER CHECK(rating IS NULL OR (rating >= 1 AND rating <= 5)),
+  yield_notes TEXT,
+  would_grow_again INTEGER,
+  review TEXT,
+  created_at TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(catalog_id, season_id)
 );
 
 CREATE TABLE IF NOT EXISTS events (

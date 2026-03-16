@@ -8,6 +8,8 @@ const VALID_HEALTH = ["healthy", "watch", "stressed", "pest_issue", "diseased", 
 const VALID_TASK_TYPES = ["seed_start", "transplant", "check", "harvest", "maintenance", "other"] as const;
 const VALID_PRIORITIES = ["low", "medium", "high"] as const;
 const VALID_EVENT_TYPES = ["created", "seeded", "transplanted", "observed", "harvested", "task_completed", "health_changed", "stage_changed", "note"] as const;
+const VALID_SUN_LEVELS = ["full_sun", "part_sun", "shade"] as const;
+
 function validateEnum(value: string, validValues: readonly string[], label: string): void {
   if (!validValues.includes(value)) {
     throw new TendError("INVALID_INPUT", `Invalid ${label}: "${value}". Valid values: ${validValues.join(", ")}`);
@@ -21,3 +23,4 @@ export function validateStage(v: string) { validateEnum(v, VALID_STAGES, "stage"
 export function validateTaskType(v: string) { validateEnum(v, VALID_TASK_TYPES, "task type"); }
 export function validatePriority(v: string) { validateEnum(v, VALID_PRIORITIES, "priority"); }
 export function validateEventType(v: string) { validateEnum(v, VALID_EVENT_TYPES, "event type"); }
+export function validateSun(v: string) { validateEnum(v, VALID_SUN_LEVELS, "sun level"); }

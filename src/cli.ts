@@ -10,7 +10,7 @@ import { handleError, output } from "./commands/output";
 import { TendError } from "./services/errors";
 import {
   validateSpaceType, validateLayoutMode, validateSourceType, validateStage,
-  validateTaskType, validatePriority, validateEventType,
+  validateTaskType, validatePriority, validateEventType, validateSun,
 } from "./commands/validate";
 import { humanize, relativeDate, shortDate, pad, cropName, header, priorityIcon } from "./commands/format";
 import { parseCoords, validateCoords, formatCoord, buildGridData, renderAsciiMap, buildMapJson } from "./commands/grid";
@@ -99,6 +99,11 @@ program
             const sched = p.target_start_date ? `  start ${relativeDate(p.target_start_date)}` : "";
             console.log(`  ${pad(cropName(p.crop, p.variety), 28)} ${pad(humanize(p.stage), 16)} ${humanize(p.health)}${where}${sched}`);
           }
+        }
+
+        if (data.catalogCount > 0) {
+          const revInfo = data.reviewCount > 0 ? ` (${data.reviewCount} reviewed this season)` : "";
+          console.log(`\nCatalog: ${data.catalogCount} varieties${revInfo}`);
         }
 
         console.log(header(`Open Tasks (${data.openTasks.length})`));
@@ -298,6 +303,7 @@ const plantingsCmd = program.command("plantings").description("Manage plantings"
 plantingsCmd
   .command("add <crop>")
   .description("Add a planting")
+  .option("--catalog <entry>", "Link to catalog entry (crop name, 'crop (variety)', or ID)")
   .option("--space <name>", "Space name")
   .option("--variety <variety>", "Variety")
   .option("--source <type>", "Source type (seed, start)", "seed")
@@ -318,13 +324,48 @@ plantingsCmd
       validateStage(opts.stage);
       const config = readConfig();
       const spaceId = resolveSpaceId(opts.space);
+      const db = getDb();
+
+      let catalogId: string | undefined;
+      let resolvedCrop = crop;
+      let resolvedVariety = opts.variety;
+      let resolvedSource = opts.source;
+      let resolvedVendor = opts.from;
+
+      if (opts.catalog) {
+        // Link to existing catalog entry
+        const entry = garden.findCatalogStrict(opts.catalog);
+        catalogId = entry.id;
+        resolvedCrop = entry.crop;
+        resolvedVariety = entry.variety;
+        resolvedSource = entry.source_type ?? opts.source;
+        resolvedVendor = entry.vendor ?? opts.from;
+      } else if (opts.variety) {
+        // Auto-create or link catalog entry when variety is provided
+        const existing = repo.findCatalogEntry(db, crop, opts.variety);
+        if (existing) {
+          catalogId = existing.id;
+        } else {
+          const entry = repo.createCatalogEntry(db, {
+            crop,
+            variety: opts.variety,
+            vendor: opts.from,
+            sourceType: opts.source,
+            gridSquares: opts.grid ? parseInt(opts.grid) : undefined,
+          });
+          catalogId = entry.id;
+          console.log(`Created catalog entry: ${cropName(entry.crop, entry.variety)}`);
+        }
+      }
+
       const planting = garden.addPlanting({
         seasonId: config.defaultSeasonId,
+        catalogId,
         spaceId,
-        crop,
-        variety: opts.variety,
-        sourceType: opts.source,
-        source: opts.from,
+        crop: resolvedCrop,
+        variety: resolvedVariety,
+        sourceType: resolvedSource,
+        source: resolvedVendor,
         stage: opts.stage,
         quantity: opts.qty ? parseFloat(opts.qty) : undefined,
         quantityUnit: opts.qtyUnit,
@@ -343,7 +384,6 @@ plantingsCmd
       // Auto-place on grid if --at provided
       if (opts.at && opts.space) {
         const cells = parseCoords(opts.at);
-        const db = getDb();
         const space = repo.getSpaceByName(db, config.defaultSeasonId, opts.space);
         if (space) {
           validateCoords(space, cells);
@@ -712,6 +752,220 @@ program
         dataJson: opts.data,
       });
       console.log(`Logged: [${humanize(event.type)}] ${event.summary}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+// --- catalog ---
+const catalogCmd = program.command("catalog").description("Manage variety reference library");
+
+catalogCmd
+  .command("add <crop>")
+  .description("Add a variety to the catalog")
+  .requiredOption("--variety <variety>", "Variety name")
+  .option("--vendor <vendor>", "Seed vendor/source")
+  .option("--url <url>", "Product page URL")
+  .option("--source <type>", "Source type (seed, start)")
+  .option("--days <n>", "Days to maturity")
+  .option("--start-weeks <n>", "Weeks before last frost to start indoors")
+  .option("--min-temp <n>", "Min night temp (F) for transplant")
+  .option("--spacing <n>", "Spacing in inches")
+  .option("--plants-per-square <n>", "Plants per square foot", "1")
+  .option("--sun <level>", "Sun requirement (full_sun, part_sun, shade)")
+  .option("--habit <type>", "Growth habit (indeterminate, determinate, bush, vine, compact)")
+  .option("--grid <n>", "Default grid squares per planting")
+  .option("--tags <tags>", "Comma-separated tags")
+  .option("--notes <text>", "Growing notes")
+  .action((crop, opts) => {
+    try {
+      if (opts.source) validateSourceType(opts.source);
+      if (opts.sun) validateSun(opts.sun);
+      const entry = garden.addCatalogEntry({
+        crop,
+        variety: opts.variety,
+        vendor: opts.vendor,
+        url: opts.url,
+        sourceType: opts.source,
+        daysToMaturity: opts.days ? parseInt(opts.days) : undefined,
+        startIndoorsWeeks: opts.startWeeks ? parseInt(opts.startWeeks) : undefined,
+        minNightTemp: opts.minTemp ? parseInt(opts.minTemp) : undefined,
+        spacingInches: opts.spacing ? parseInt(opts.spacing) : undefined,
+        plantsPerSquare: opts.plantsPerSquare ? parseInt(opts.plantsPerSquare) : undefined,
+        sun: opts.sun,
+        growthHabit: opts.habit,
+        gridSquares: opts.grid ? parseInt(opts.grid) : undefined,
+        tags: opts.tags,
+        notes: opts.notes,
+      });
+      console.log(`Added to catalog: ${cropName(entry.crop, entry.variety)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+catalogCmd
+  .command("list")
+  .description("List catalog entries")
+  .option("--crop <crop>", "Filter by crop")
+  .option("--tag <tag>", "Filter by tag")
+  .option("--vendor <vendor>", "Filter by vendor")
+  .option("--json", "Output as JSON", false)
+  .action((opts) => {
+    try {
+      const entries = garden.listCatalog({ crop: opts.crop, tag: opts.tag, vendor: opts.vendor });
+      if (opts.json) {
+        output(entries, true);
+      } else {
+        if (entries.length === 0) { console.log("No catalog entries."); return; }
+        console.log(header(`Catalog (${entries.length} varieties)`));
+        for (const e of entries) {
+          const days = e.days_to_maturity ? `${pad(e.days_to_maturity + " days", 10)}` : pad("", 10);
+          const vendor = e.vendor ? `  ${pad(e.vendor, 20)}` : pad("", 22);
+          const tags = e.tags ? `  ${e.tags}` : "";
+          console.log(`  ${pad(cropName(e.crop, e.variety), 38)} ${days}${vendor}${tags}`);
+        }
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
+catalogCmd
+  .command("show <cropOrId>")
+  .description("Show full detail for a catalog entry")
+  .option("--json", "Output as JSON", false)
+  .action((cropOrId, opts) => {
+    try {
+      const data = garden.getCatalogShow(cropOrId);
+      if (opts.json) {
+        output(data, true);
+      } else {
+        const e = data.entry;
+        console.log(header(cropName(e.crop, e.variety)));
+        if (e.vendor) console.log(`  Vendor:            ${e.vendor}`);
+        if (e.url) console.log(`  URL:               ${e.url}`);
+        if (e.source_type) console.log(`  Source:            ${humanize(e.source_type)}`);
+        if (e.days_to_maturity) console.log(`  Days to maturity:  ${e.days_to_maturity}`);
+        if (e.start_indoors_weeks) console.log(`  Start indoors:     ${e.start_indoors_weeks} weeks before last frost`);
+        if (e.min_night_temp) console.log(`  Min night temp:    ${e.min_night_temp}°F`);
+        if (e.spacing_inches) console.log(`  Spacing:           ${e.spacing_inches}"`);
+        if (e.plants_per_square && e.plants_per_square !== 1) console.log(`  Plants per sq ft:  ${e.plants_per_square}`);
+        if (e.sun) console.log(`  Sun:               ${humanize(e.sun)}`);
+        if (e.growth_habit) console.log(`  Growth habit:      ${e.growth_habit}`);
+        if (e.grid_squares) console.log(`  Default grid:      ${e.grid_squares} square(s)`);
+        if (e.tags) console.log(`  Tags:              ${e.tags}`);
+        if (e.notes) console.log(`\n  Notes:\n    ${e.notes}`);
+
+        if (data.plantings.length > 0) {
+          console.log(header("Season History"));
+          for (const p of data.plantings) {
+            const gridInfo = p.grid_count ? `${p.grid_count} squares` : "";
+            const review = data.reviews.find((r: any) => r.season_id === p.season_id);
+            const rating = review?.rating ? "★".repeat(review.rating) + "☆".repeat(5 - review.rating) : "(no review)";
+            const spaceName = p.space_name ?? "";
+            console.log(`  ${p.year}  ${pad(spaceName, 16)} ${pad(gridInfo, 12)} ${pad(humanize(p.stage), 14)} ${rating}`);
+            if (review?.review) console.log(`        "${review.review}"`);
+          }
+        }
+      }
+    } catch (e) { handleError(e, opts.json); }
+  });
+
+catalogCmd
+  .command("update <cropOrId>")
+  .description("Update catalog entry fields")
+  .option("--crop <name>", "Rename the crop")
+  .option("--variety <variety>", "Update variety")
+  .option("--vendor <vendor>", "Update vendor")
+  .option("--url <url>", "Update URL")
+  .option("--source <type>", "Update source type (seed, start)")
+  .option("--days <n>", "Update days to maturity")
+  .option("--start-weeks <n>", "Update start indoors weeks")
+  .option("--min-temp <n>", "Update min night temp")
+  .option("--spacing <n>", "Update spacing")
+  .option("--plants-per-square <n>", "Update plants per square foot")
+  .option("--sun <level>", "Update sun requirement")
+  .option("--habit <type>", "Update growth habit")
+  .option("--grid <n>", "Update default grid squares")
+  .option("--tags <tags>", "Update tags (replaces)")
+  .option("--notes <text>", "Update notes (replaces)")
+  .option("--notes-append <text>", "Append to notes")
+  .action((cropOrId, opts) => {
+    try {
+      const input: any = {};
+      let hasUpdate = false;
+      if (opts.crop) { input.crop = opts.crop; hasUpdate = true; }
+      if (opts.variety) { input.variety = opts.variety; hasUpdate = true; }
+      if (opts.vendor) { input.vendor = opts.vendor; hasUpdate = true; }
+      if (opts.url) { input.url = opts.url; hasUpdate = true; }
+      if (opts.source) { validateSourceType(opts.source); input.sourceType = opts.source; hasUpdate = true; }
+      if (opts.days) { input.daysToMaturity = parseInt(opts.days); hasUpdate = true; }
+      if (opts.startWeeks) { input.startIndoorsWeeks = parseInt(opts.startWeeks); hasUpdate = true; }
+      if (opts.minTemp) { input.minNightTemp = parseInt(opts.minTemp); hasUpdate = true; }
+      if (opts.spacing) { input.spacingInches = parseInt(opts.spacing); hasUpdate = true; }
+      if (opts.plantsPerSquare) { input.plantsPerSquare = parseInt(opts.plantsPerSquare); hasUpdate = true; }
+      if (opts.sun) { validateSun(opts.sun); input.sun = opts.sun; hasUpdate = true; }
+      if (opts.habit) { input.growthHabit = opts.habit; hasUpdate = true; }
+      if (opts.grid) { input.gridSquares = parseInt(opts.grid); hasUpdate = true; }
+      if (opts.tags) { input.tags = opts.tags; hasUpdate = true; }
+      if (opts.notes) { input.notes = opts.notes; hasUpdate = true; }
+      if (opts.notesAppend) { input.notesAppend = opts.notesAppend; hasUpdate = true; }
+      if (!hasUpdate) throw new TendError("INVALID_INPUT", "Nothing to update. Provide at least one option.");
+      const entry = garden.updateCatalogEntry(cropOrId, input);
+      console.log(`Updated: ${cropName(entry!.crop, entry!.variety)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+catalogCmd
+  .command("remove <cropOrId>")
+  .description("Remove a catalog entry")
+  .option("--force", "Remove catalog entry and all linked plantings", false)
+  .action((cropOrId, opts) => {
+    try {
+      const entry = garden.removeCatalogEntry(cropOrId, opts.force);
+      console.log(`Removed from catalog: ${cropName(entry.crop, entry.variety)}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+catalogCmd
+  .command("review <cropOrId>")
+  .description("Log an end-of-season review")
+  .option("--rating <n>", "Star rating (1-5)")
+  .option("--yield <text>", "Yield notes")
+  .option("--would-grow-again", "Would grow again", false)
+  .option("--no-grow-again", "Would not grow again", false)
+  .option("--notes <text>", "Review notes")
+  .action((cropOrId, opts) => {
+    try {
+      const input: any = {};
+      if (opts.rating) input.rating = parseInt(opts.rating);
+      if (opts.yield) input.yieldNotes = opts.yield;
+      if (opts.wouldGrowAgain) input.wouldGrowAgain = true;
+      if (opts.noGrowAgain) input.wouldGrowAgain = false;
+      if (opts.notes) input.review = opts.notes;
+      const { entry, review } = garden.reviewCatalogEntry(cropOrId, input);
+      const stars = review.rating ? " " + "★".repeat(review.rating) + "☆".repeat(5 - review.rating) : "";
+      console.log(`Reviewed: ${cropName(entry.crop, entry.variety)}${stars}`);
+    } catch (e) { handleError(e, false); }
+  });
+
+catalogCmd
+  .command("import")
+  .description("Import current season's plantings into the catalog")
+  .option("--dry-run", "Show what would be imported without doing it", false)
+  .action((opts) => {
+    try {
+      const config = readConfig();
+      const results = garden.importCatalog(config.defaultSeasonId, opts.dryRun);
+      if (results.length === 0) {
+        console.log("Nothing to import — all plantings with varieties are already cataloged.");
+        return;
+      }
+      const verb = opts.dryRun ? "Would import" : "Imported";
+      console.log(`${verb} ${results.length} planting(s):`);
+      const spaceMap = buildSpaceMap();
+      for (const r of results) {
+        const spaceName = r.planting.space_id ? spaceMap.get(r.planting.space_id) : null;
+        const where = spaceName ? `  from ${spaceName}` : "";
+        const action = r.created ? "+" : "→";
+        console.log(`  ${action} ${cropName(r.planting.crop, r.planting.variety)}${where}`);
+      }
+      if (opts.dryRun) console.log("\nRun without --dry-run to import.");
     } catch (e) { handleError(e, false); }
   });
 

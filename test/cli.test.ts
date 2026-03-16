@@ -376,6 +376,159 @@ describe("CLI integration", () => {
     expect(week.scheduleActions[0].planting.crop).toBe("pepper");
   });
 
+  // --- Catalog CLI tests ---
+
+  test("catalog add and list", () => {
+    cli("init --name G --year 2026");
+
+    const out = cli("catalog add Pepper --variety Corno-di-Toro --vendor Burpee --days 80 --sun full_sun --tags italian,roasting");
+    expect(out).toContain("Added to catalog");
+    expect(out).toContain("Pepper");
+
+    cli("catalog add Tomato --variety Early-Girl --days 52");
+
+    const entries = cliJson("catalog list --json");
+    expect(entries).toHaveLength(2);
+    expect(entries[0].crop).toBe("Pepper");
+    expect(entries[0].days_to_maturity).toBe(80);
+    expect(entries[1].crop).toBe("Tomato");
+  });
+
+  test("catalog add rejects duplicate", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Tomato --variety Early-Girl");
+
+    let threw = false;
+    try { cli("catalog add Tomato --variety Early-Girl"); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test("catalog show displays detail", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Pepper --variety Test --vendor Burpee --days 80 --sun full_sun");
+
+    const out = cli("catalog show Pepper");
+    expect(out).toContain("Pepper (Test)");
+    expect(out).toContain("Burpee");
+    expect(out).toContain("80");
+    expect(out).toContain("Full Sun");
+  });
+
+  test("catalog update modifies fields", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Tomato --variety EG");
+
+    cli("catalog update Tomato --days 52 --vendor Local");
+    const entries = cliJson("catalog list --json");
+    expect(entries[0].days_to_maturity).toBe(52);
+    expect(entries[0].vendor).toBe("Local");
+  });
+
+  test("catalog remove works", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Basil --variety Genovese");
+
+    const out = cli("catalog remove Basil");
+    expect(out).toContain("Removed");
+    expect(cliJson("catalog list --json")).toHaveLength(0);
+  });
+
+  test("catalog remove blocked when planting references it", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Tomato --variety EG");
+    cli("plantings add Tomato --variety EG");
+
+    let threw = false;
+    try { cli("catalog remove Tomato"); } catch { threw = true; }
+    expect(threw).toBe(true);
+  });
+
+  test("catalog remove --force removes linked plantings", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Tomato --variety EG");
+    cli("plantings add Tomato --variety EG");
+
+    cli("catalog remove Tomato --force");
+    expect(cliJson("catalog list --json")).toHaveLength(0);
+    expect(cliJson("plantings list --json")).toHaveLength(0);
+  });
+
+  test("catalog review creates and updates", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Pepper --variety Test");
+
+    const out = cli("catalog review Pepper --rating 4 --yield great --would-grow-again");
+    expect(out).toContain("Reviewed");
+
+    // Update existing review
+    const out2 = cli("catalog review Pepper --rating 5");
+    expect(out2).toContain("Reviewed");
+
+    const data = cliJson("catalog show Pepper --json");
+    expect(data.reviews).toHaveLength(1);
+    expect(data.reviews[0].rating).toBe(5);
+  });
+
+  test("plantings add auto-creates catalog entry when variety provided", () => {
+    cli("init --name G --year 2026");
+
+    cli("plantings add Tomato --variety Early-Girl --from Burpee");
+
+    const entries = cliJson("catalog list --json");
+    expect(entries).toHaveLength(1);
+    expect(entries[0].crop).toBe("Tomato");
+    expect(entries[0].variety).toBe("Early-Girl");
+
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].catalog_id).toBe(entries[0].id);
+  });
+
+  test("plantings add with --catalog links to existing entry", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Pepper --variety Test --days 80");
+
+    cli("plantings add Pepper --catalog Pepper --start-date 2026-03-01");
+
+    const plantings = cliJson("plantings list --json");
+    expect(plantings[0].crop).toBe("Pepper");
+    expect(plantings[0].variety).toBe("Test");
+    expect(plantings[0].catalog_id).not.toBeNull();
+  });
+
+  test("catalog import handles already-cataloged plantings", () => {
+    cli("init --name G --year 2026");
+    // plantings add with --variety auto-creates catalog, so import should find nothing new
+    cli("plantings add Tomato --variety Cherokee-Purple --from Burpee");
+    cli("plantings add peas --stage direct_sown"); // no variety, won't import
+
+    const out = cli("catalog import");
+    expect(out).toContain("Nothing to import");
+
+    // Catalog was auto-created by plantings add
+    const entries = cliJson("catalog list --json");
+    expect(entries).toHaveLength(1);
+    expect(entries[0].crop).toBe("Tomato");
+  });
+
+  test("catalog list filters by tag", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Pepper --variety A --tags hot,red");
+    cli("catalog add Pepper --variety B --tags mild");
+    cli("catalog add Tomato --variety C --tags hot");
+
+    const hot = cliJson("catalog list --tag hot --json");
+    expect(hot).toHaveLength(2);
+  });
+
+  test("summary shows catalog count", () => {
+    cli("init --name G --year 2026");
+    cli("catalog add Tomato --variety EG");
+    cli("catalog add Pepper --variety Test");
+
+    const out = cli("summary");
+    expect(out).toContain("Catalog: 2 varieties");
+  });
+
   test("spaces remove", () => {
     cli("init --name G --year 2026");
     cli("spaces add bed-1 --type raised_bed");
